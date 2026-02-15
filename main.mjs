@@ -14,8 +14,13 @@ const __dirname = dirname(__filename);
 const store = new Store();
 
 let mainWindow;
-let photosDir;
-let thumbsDir;
+
+// Storage paths - initialize early
+let storagePath = store.get('storagePath');
+let photosDir = storagePath ? path.join(storagePath, 'PhotoVault', 'photos') : null;
+let thumbsDir = storagePath ? path.join(storagePath, 'PhotoVault', 'thumbnails') : null;
+
+console.log('Initial storage paths:', { storagePath, photosDir, thumbsDir });
 
 // Ask user to choose storage location
 async function chooseStorageLocation() {
@@ -33,31 +38,42 @@ async function chooseStorageLocation() {
 
 // Initialize storage with user-chosen or default location
 async function initializeStorage() {
-    let storagePath = store.get('storagePath');
+    let currentStoragePath = store.get('storagePath');
+    
+    console.log('initializeStorage called, current path:', currentStoragePath);
     
     // If no storage path set, ask user
-    if (!storagePath) {
+    if (!currentStoragePath) {
+        console.log('No storage path set, showing dialog...');
         // Show dialog to choose location
-        storagePath = await chooseStorageLocation();
+        currentStoragePath = await chooseStorageLocation();
         
         // If user cancelled, use default location
-        if (!storagePath) {
-            storagePath = app.getPath('documents');
+        if (!currentStoragePath) {
+            currentStoragePath = app.getPath('documents');
+            console.log('User cancelled, using default:', currentStoragePath);
+        } else {
+            console.log('User chose:', currentStoragePath);
         }
         
         // Save the chosen path
-        store.set('storagePath', storagePath);
+        store.set('storagePath', currentStoragePath);
     }
     
     // Set up directories
+    storagePath = currentStoragePath;
     photosDir = path.join(storagePath, 'PhotoVault', 'photos');
     thumbsDir = path.join(storagePath, 'PhotoVault', 'thumbnails');
     
+    console.log('Setting up directories:', { photosDir, thumbsDir });
+    
     // Create directories
     if (!fs.existsSync(photosDir)) {
+        console.log('Creating photos directory:', photosDir);
         fs.mkdirSync(photosDir, { recursive: true });
     }
     if (!fs.existsSync(thumbsDir)) {
+        console.log('Creating thumbnails directory:', thumbsDir);
         fs.mkdirSync(thumbsDir, { recursive: true });
     }
     
@@ -76,6 +92,10 @@ function generatePhotoId() {
 
 // Copy photo to app storage
 async function copyPhotoToStorage(sourcePath, photoId) {
+    if (!photosDir) {
+        throw new Error('Storage not initialized - photosDir is null');
+    }
+    
     const ext = path.extname(sourcePath);
     const date = new Date();
     const yearMonth = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
@@ -83,13 +103,18 @@ async function copyPhotoToStorage(sourcePath, photoId) {
     // Create year-month folder
     const monthDir = path.join(photosDir, yearMonth);
     if (!fs.existsSync(monthDir)) {
+        console.log('Creating month directory:', monthDir);
         fs.mkdirSync(monthDir, { recursive: true });
     }
     
     const destPath = path.join(monthDir, `${photoId}${ext}`);
     
+    console.log('Copying photo from', sourcePath, 'to', destPath);
+    
     // Copy file
     fs.copyFileSync(sourcePath, destPath);
+    
+    console.log('Photo copied successfully');
     
     return {
         storagePath: destPath,
@@ -99,19 +124,30 @@ async function copyPhotoToStorage(sourcePath, photoId) {
 
 // Create thumbnail (simple copy, resized in browser)
 async function createThumbnail(sourcePath, photoId) {
+    if (!thumbsDir) {
+        throw new Error('Storage not initialized - thumbsDir is null');
+    }
+    
     const ext = path.extname(sourcePath);
     const thumbPath = path.join(thumbsDir, `${photoId}${ext}`);
     
+    console.log('Creating thumbnail from', sourcePath, 'to', thumbPath);
+    
     // Just copy the file (browser will resize it)
     fs.copyFileSync(sourcePath, thumbPath);
+    
+    console.log('Thumbnail created successfully');
+    
     return thumbPath;
 }
 
 // Get file as base64 (for displaying in browser)
 function getPhotoAsBase64(photoPath) {
     try {
+        console.log('Reading photo as Base64:', photoPath);
+        
         if (!fs.existsSync(photoPath)) {
-            console.error('Photo file not found:', photoPath);
+            console.error('❌ Photo file not found:', photoPath);
             return null;
         }
         
@@ -126,9 +162,12 @@ function getPhotoAsBase64(photoPath) {
             '.webp': 'image/webp'
         }[ext] || 'image/jpeg';
         
-        return `data:${mimeType};base64,${data.toString('base64')}`;
+        const base64 = `data:${mimeType};base64,${data.toString('base64')}`;
+        console.log(`✅ Read photo successfully (${data.length} bytes, Base64: ${base64.length} chars)`);
+        
+        return base64;
     } catch (error) {
-        console.error('Error reading photo:', error);
+        console.error('❌ Error reading photo:', error);
         return null;
     }
 }
@@ -136,9 +175,14 @@ function getPhotoAsBase64(photoPath) {
 // Delete photo files
 function deletePhotoFiles(photoId, relativePath) {
     try {
+        if (!photosDir || !thumbsDir) {
+            throw new Error('Storage not initialized');
+        }
+        
         // Delete main photo
         const photoPath = path.join(photosDir, relativePath);
         if (fs.existsSync(photoPath)) {
+            console.log('Deleting photo:', photoPath);
             fs.unlinkSync(photoPath);
         }
         
@@ -147,6 +191,7 @@ function deletePhotoFiles(photoId, relativePath) {
         for (const ext of thumbExtensions) {
             const thumbPath = path.join(thumbsDir, `${photoId}${ext}`);
             if (fs.existsSync(thumbPath)) {
+                console.log('Deleting thumbnail:', thumbPath);
                 fs.unlinkSync(thumbPath);
                 break;
             }
@@ -213,8 +258,12 @@ app.on('window-all-closed', () => {
 // IPC Handlers for file operations
 ipcMain.handle('save-photo', async (event, photoData) => {
     try {
+        console.log('\n=== SAVE PHOTO ===');
+        console.log('Received photo data:', photoData);
+        
         // Get current photos metadata
         const photos = store.get('photos', []);
+        console.log(`Current photo count: ${photos.length}`);
         
         // Add metadata without base64 data
         const metadata = {
@@ -236,50 +285,57 @@ ipcMain.handle('save-photo', async (event, photoData) => {
         photos.push(metadata);
         store.set('photos', photos);
         
-        console.log('Photo saved:', metadata.name);
+        console.log('✅ Photo saved:', metadata.name);
+        console.log(`New photo count: ${photos.length}`);
         
         return { success: true, photo: metadata };
     } catch (error) {
-        console.error('Error saving photo:', error);
+        console.error('❌ Error saving photo:', error);
         return { success: false, error: error.message };
     }
 });
 
 ipcMain.handle('get-photos', async () => {
     try {
+        console.log('\n=== GET PHOTOS ===');
         const photos = store.get('photos', []);
         
         console.log(`Loading ${photos.length} photos...`);
         
         // Add base64 data for thumbnails
-        const photosWithData = photos.map(photo => {
+        const photosWithData = photos.map((photo, index) => {
+            console.log(`Processing photo ${index + 1}: ${photo.name}`);
             const thumbData = getPhotoAsBase64(photo.thumbnailPath);
             
             if (!thumbData) {
-                console.warn('Failed to load thumbnail for:', photo.name);
+                console.warn(`⚠️ Failed to load thumbnail for: ${photo.name}`);
             }
             
             return {
                 ...photo,
-                src: thumbData || 'data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMjAwIiBoZWlnaHQ9IjIwMCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48cmVjdCB3aWR0aD0iMjAwIiBoZWlnaHQ9IjIwMCIgZmlsbD0iI2NjYyIvPjx0ZXh0IHg9IjUwJSIgeT0iNTAlIiBmb250LXNpemU9IjE2IiBmaWxsPSIjNjY2IiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBkeT0iLjNlbSI+Tm8gSW1hZ2U8L3RleHQ+PC9zdmc+' // Fallback placeholder
+                src: thumbData || 'data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMjAwIiBoZWlnaHQ9IjIwMCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48cmVjdCB3aWR0aD0iMjAwIiBoZWlnaHQ9IjIwMCIgZmlsbD0iI2NjYyIvPjx0ZXh0IHg9IjUwJSIgeT0iNTAlIiBmb250LXNpemU9IjE2IiBmaWxsPSIjNjY2IiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBkeT0iLjNlbSI+Tm8gSW1hZ2U8L3RleHQ+PC9zdmc+'
             };
         });
         
-        console.log(`Loaded ${photosWithData.length} photos with thumbnails`);
+        console.log(`✅ Loaded ${photosWithData.length} photos with thumbnails`);
         
         return { success: true, photos: photosWithData };
     } catch (error) {
-        console.error('Error getting photos:', error);
+        console.error('❌ Error getting photos:', error);
         return { success: false, error: error.message, photos: [] };
     }
 });
 
 ipcMain.handle('get-full-photo', async (event, photoId) => {
     try {
+        console.log('\n=== GET FULL PHOTO ===');
+        console.log('Photo ID:', photoId);
+        
         const photos = store.get('photos', []);
         const photo = photos.find(p => p.id === photoId);
         
         if (!photo) {
+            console.error('❌ Photo not found');
             return { success: false, error: 'Photo not found' };
         }
         
@@ -287,8 +343,11 @@ ipcMain.handle('get-full-photo', async (event, photoId) => {
         const fullData = getPhotoAsBase64(photo.storagePath);
         
         if (!fullData) {
+            console.error('❌ Could not load photo file');
             return { success: false, error: 'Could not load photo file' };
         }
+        
+        console.log('✅ Full photo loaded');
         
         return { 
             success: true, 
@@ -298,7 +357,7 @@ ipcMain.handle('get-full-photo', async (event, photoId) => {
             }
         };
     } catch (error) {
-        console.error('Error getting full photo:', error);
+        console.error('❌ Error getting full photo:', error);
         return { success: false, error: error.message };
     }
 });
@@ -320,6 +379,9 @@ ipcMain.handle('update-photo', async (event, photoId, updates) => {
 
 ipcMain.handle('delete-photo', async (event, photoId) => {
     try {
+        console.log('\n=== DELETE PHOTO ===');
+        console.log('Photo ID:', photoId);
+        
         const photos = store.get('photos', []);
         const photo = photos.find(p => p.id === photoId);
         
@@ -330,14 +392,21 @@ ipcMain.handle('delete-photo', async (event, photoId) => {
         
         const filtered = photos.filter(p => p.id !== photoId);
         store.set('photos', filtered);
+        
+        console.log('✅ Photo deleted');
+        
         return { success: true };
     } catch (error) {
+        console.error('❌ Error deleting photo:', error);
         return { success: false, error: error.message };
     }
 });
 
 ipcMain.handle('delete-photos', async (event, photoIds) => {
     try {
+        console.log('\n=== DELETE PHOTOS ===');
+        console.log('Photo IDs:', photoIds);
+        
         const photos = store.get('photos', []);
         
         // Delete physical files for each photo
@@ -350,8 +419,12 @@ ipcMain.handle('delete-photos', async (event, photoIds) => {
         
         const filtered = photos.filter(p => !photoIds.includes(p.id));
         store.set('photos', filtered);
+        
+        console.log(`✅ Deleted ${photoIds.length} photos`);
+        
         return { success: true };
     } catch (error) {
+        console.error('❌ Error deleting photos:', error);
         return { success: false, error: error.message };
     }
 });
@@ -443,13 +516,15 @@ ipcMain.handle('open-file-dialog', async () => {
     if (!result.canceled && result.filePaths.length > 0) {
         const files = [];
         
-        console.log(`Importing ${result.filePaths.length} photos...`);
+        console.log(`\n=== IMPORTING ${result.filePaths.length} PHOTOS ===`);
         
         for (const filePath of result.filePaths) {
             try {
                 const photoId = generatePhotoId();
                 
-                console.log(`Processing: ${path.basename(filePath)}`);
+                console.log(`\nProcessing: ${path.basename(filePath)}`);
+                console.log('  Source:', filePath);
+                console.log('  ID:', photoId);
                 
                 // Copy photo to storage
                 const { storagePath, relativePath } = await copyPhotoToStorage(filePath, photoId);
@@ -460,7 +535,7 @@ ipcMain.handle('open-file-dialog', async () => {
                 // Get file stats
                 const stats = fs.statSync(filePath);
                 
-                files.push({
+                const fileData = {
                     id: photoId,
                     name: path.basename(filePath),
                     storagePath: storagePath,
@@ -468,15 +543,17 @@ ipcMain.handle('open-file-dialog', async () => {
                     thumbnailPath: thumbnailPath,
                     originalPath: filePath,
                     fileSize: stats.size
-                });
+                };
                 
-                console.log(`✓ Imported: ${path.basename(filePath)}`);
+                files.push(fileData);
+                
+                console.log(`✅ Imported: ${path.basename(filePath)}`);
             } catch (error) {
-                console.error('Error processing file:', filePath, error);
+                console.error(`❌ Error processing file ${filePath}:`, error);
             }
         }
         
-        console.log(`Successfully imported ${files.length} photos`);
+        console.log(`\n=== Successfully imported ${files.length} photos ===\n`);
         
         return { success: true, files };
     }
@@ -519,14 +596,14 @@ ipcMain.handle('get-storage-info', async () => {
     try {
         const photos = store.get('photos', []);
         const totalSize = photos.reduce((sum, photo) => sum + (photo.fileSize || 0), 0);
-        const storagePath = store.get('storagePath') || app.getPath('documents');
+        const currentStoragePath = store.get('storagePath') || app.getPath('documents');
         
         return {
             success: true,
             info: {
                 photoCount: photos.length,
                 totalSize: totalSize,
-                storagePath: storagePath,
+                storagePath: currentStoragePath,
                 photosPath: photosDir,
                 thumbnailsPath: thumbsDir
             }

@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Import Test</title>
+</head>
+<body>
+    <h1>PhotoVault Import Test</h1>
+    <button onclick="testImport()">Test Import</button>
+    <button onclick="checkStorage()">Check Storage</button>
+    <button onclick="checkPhotos()">Check Photos</button>
+    <pre id="output"></pre>
+    
+    <script>
+        const output = document.getElementById('output');
+        
+        function log(msg) {
+            console.log(msg);
+            output.textContent += msg + '\n';
+        }
+        
+        async function testImport() {
+            output.textContent = '';
+            log('=== TESTING IMPORT ===\n');
+            
+            try {
+                log('1. Checking electronAPI...');
+                if (!window.electronAPI) {
+                    log('❌ electronAPI not found!');
+                    return;
+                }
+                log('✅ electronAPI exists');
+                
+                log('\n2. Opening file dialog...');
+                const result = await window.electronAPI.openFileDialog();
+                log('Result: ' + JSON.stringify(result, null, 2));
+                
+                if (!result.success || result.files.length === 0) {
+                    log('❌ No files selected');
+                    return;
+                }
+                
+                log(`\n3. Got ${result.files.length} files`);
+                
+                for (const file of result.files) {
+                    log('\n--- Processing: ' + file.name);
+                    log('File ID: ' + file.id);
+                    log('Storage path: ' + file.storagePath);
+                    log('Thumbnail path: ' + file.thumbnailPath);
+                    
+                    const photo = {
+                        id: file.id,
+                        name: file.name,
+                        storagePath: file.storagePath,
+                        relativePath: file.relativePath,
+                        thumbnailPath: file.thumbnailPath,
+                        originalPath: file.originalPath,
+                        date: new Date().toLocaleDateString(),
+                        dateAdded: new Date().toISOString(),
+                        favorite: false,
+                        faces: 0,
+                        album: null,
+                        tags: [],
+                        fileSize: file.fileSize
+                    };
+                    
+                    log('Saving...');
+                    const saveResult = await window.electronAPI.savePhoto(photo);
+                    log('Save result: ' + JSON.stringify(saveResult, null, 2));
+                }
+                
+                log('\n4. Getting photos...');
+                const photos = await window.electronAPI.getPhotos();
+                log('Photos: ' + JSON.stringify(photos, null, 2));
+                
+            } catch (error) {
+                log('❌ ERROR: ' + error.message);
+                log(error.stack);
+            }
+        }
+        
+        async function checkStorage() {
+            output.textContent = '';
+            log('=== CHECKING STORAGE ===\n');
+            try {
+                const info = await window.electronAPI.getStorageInfo();
+                log(JSON.stringify(info, null, 2));
+            } catch (error) {
+                log('❌ ERROR: ' + error.message);
+            }
+        }
+        
+        async function checkPhotos() {
+            output.textContent = '';
+            log('=== CHECKING PHOTOS ===\n');
+            try {
+                const photos = await window.electronAPI.getPhotos();
+                log(JSON.stringify(photos, null, 2));
+            } catch (error) {
+                log('❌ ERROR: ' + error.message);
+            }
+        }
+    </script>
+</body>
+</html>
