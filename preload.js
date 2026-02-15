@@ -6,6 +6,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     // Photo operations
     savePhoto: (photoData) => ipcRenderer.invoke('save-photo', photoData),
     getPhotos: () => ipcRenderer.invoke('get-photos'),
+    getFullPhoto: (photoId) => ipcRenderer.invoke('get-full-photo', photoId),
     updatePhoto: (photoId, updates) => ipcRenderer.invoke('update-photo', photoId, updates),
     deletePhoto: (photoId) => ipcRenderer.invoke('delete-photo', photoId),
     deletePhotos: (photoIds) => ipcRenderer.invoke('delete-photos', photoIds),
@@ -18,7 +19,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
     
     // File operations
     openFileDialog: () => ipcRenderer.invoke('open-file-dialog'),
-    exportPhoto: (photoData, defaultName) => ipcRenderer.invoke('export-photo', photoData, defaultName),
+    exportPhoto: (photoId, defaultName) => ipcRenderer.invoke('export-photo', photoId, defaultName),
+    
+    // Storage info
+    getStorageInfo: () => ipcRenderer.invoke('get-storage-info'),
     
     // Utility
     clearAllData: () => ipcRenderer.invoke('clear-all-data')
