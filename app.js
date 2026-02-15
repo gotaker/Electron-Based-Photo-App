@@ -29,9 +29,22 @@ async function initApp() {
 
 // Load data from Electron store
 async function loadPhotos() {
+    console.log('Loading photos from storage...');
     const result = await window.electronAPI.getPhotos();
+    console.log('Load photos result:', result);
+    
     if (result.success) {
         photos = result.photos;
+        console.log(`Loaded ${photos.length} photos`);
+        
+        // Debug: Check if photos have src
+        photos.forEach((photo, index) => {
+            if (!photo.src) {
+                console.warn(`Photo ${index} (${photo.name}) has no src!`, photo);
+            }
+        });
+    } else {
+        console.error('Failed to load photos:', result.error);
     }
 }
 
@@ -54,10 +67,16 @@ async function loadAlbums() {
 
 // File handling
 async function importPhotos() {
+    console.log('Opening file dialog...');
     const result = await window.electronAPI.openFileDialog();
+    console.log('File dialog result:', result);
     
     if (result.success && result.files.length > 0) {
+        console.log(`Importing ${result.files.length} files...`);
+        
         for (const file of result.files) {
+            console.log('Processing file:', file);
+            
             const photo = {
                 id: file.id,
                 name: file.name,
@@ -74,15 +93,23 @@ async function importPhotos() {
                 fileSize: file.fileSize
             };
             
+            console.log('Saving photo metadata:', photo);
             const saveResult = await window.electronAPI.savePhoto(photo);
+            console.log('Save result:', saveResult);
+            
             if (saveResult.success) {
-                photos.push(saveResult.photo);
+                // Reload photos to get them with src data
+                await loadPhotos();
+            } else {
+                console.error('Failed to save photo:', saveResult.error);
             }
         }
         
         renderGallery();
         updateCounts();
         updateStorageInfo();
+    } else {
+        console.log('No files selected or import cancelled');
     }
 }
 
@@ -93,6 +120,8 @@ function renderGallery() {
     const emptyState = document.getElementById('emptyState');
 
     let filteredPhotos = getFilteredPhotos();
+    
+    console.log(`Rendering gallery with ${photos.length} total photos, ${filteredPhotos.length} filtered`);
 
     if (photos.length === 0) {
         uploadZone.style.display = 'block';
@@ -112,9 +141,15 @@ function renderGallery() {
     gallery.style.display = 'grid';
     emptyState.style.display = 'none';
 
-    gallery.innerHTML = filteredPhotos.map((photo) => `
+    gallery.innerHTML = filteredPhotos.map((photo) => {
+        // Debug each photo
+        if (!photo.src) {
+            console.error('Photo missing src:', photo);
+        }
+        
+        return `
         <div class="photo-card" onclick="openPhoto('${photo.id}')">
-            <img src="${photo.src}" alt="${photo.name}">
+            <img src="${photo.src || 'data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMjAwIiBoZWlnaHQ9IjIwMCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48cmVjdCB3aWR0aD0iMjAwIiBoZWlnaHQ9IjIwMCIgZmlsbD0iI2NjYyIvPjx0ZXh0IHg9IjUwJSIgeT0iNTAlIiBmb250LXNpemU9IjE2IiBmaWxsPSIjNjY2IiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBkeT0iLjNlbSI+Tm8gSW1hZ2U8L3RleHQ+PC9zdmc+'}" alt="${photo.name}" onerror="console.error('Image failed to load:', '${photo.name}')">
             <div class="photo-select ${selectedPhotos.has(photo.id) ? 'selected' : ''}" 
                  onclick="event.stopPropagation(); toggleSelect('${photo.id}')"></div>
             ${photo.faces > 0 ? `<div class="face-badge">👤 ${photo.faces} ${photo.faces === 1 ? 'person' : 'people'}</div>` : ''}
@@ -124,7 +159,8 @@ function renderGallery() {
                 <div class="photo-date">${photo.date}</div>
             </div>
         </div>
-    `).join('');
+    `;
+    }).join('');
 
     updateToolbar();
 }
@@ -258,13 +294,22 @@ function updateToolbar() {
 async function deleteSelected() {
     if (confirm(`Delete ${selectedPhotos.size} photo(s)?`)) {
         const photoIds = Array.from(selectedPhotos);
+        console.log('Deleting photos:', photoIds);
+        
         const result = await window.electronAPI.deletePhotos(photoIds);
+        console.log('Delete result:', result);
         
         if (result.success) {
-            photos = photos.filter(p => !selectedPhotos.has(p.id));
             selectedPhotos.clear();
+            // Reload photos from storage to get fresh data
+            await loadPhotos();
             renderGallery();
             updateCounts();
+            updateStorageInfo();
+            console.log('Photos deleted successfully');
+        } else {
+            console.error('Failed to delete photos:', result.error);
+            alert('Failed to delete photos: ' + result.error);
         }
     }
 }
