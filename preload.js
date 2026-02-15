@@ -21,8 +21,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
     openFileDialog: () => ipcRenderer.invoke('open-file-dialog'),
     exportPhoto: (photoId, defaultName) => ipcRenderer.invoke('export-photo', photoId, defaultName),
     
-    // Storage info
+    // Storage operations
     getStorageInfo: () => ipcRenderer.invoke('get-storage-info'),
+    changeStorageLocation: () => ipcRenderer.invoke('change-storage-location'),
     
     // Utility
     clearAllData: () => ipcRenderer.invoke('clear-all-data')
