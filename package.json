@@ -23,8 +23,8 @@
     "multer": "^2.0.0"
   },
   "devDependencies": {
-    "electron": "^35.7.5",
-    "electron-builder": "^26.7.0"
+    "electron": "^30.0.0",
+    "electron-builder": "^24.13.3"
   },
   "build": {
     "appId": "com.photovault.app",
@@ -34,7 +34,7 @@
     },
     "files": [
       "main.mjs",
-      "preload.mjs",
+      "preload.js",
       "renderer/**/*",
       "backend/**/*",
       "node_modules/**/*",
