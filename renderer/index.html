@@ -1,0 +1,203 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PhotoVault - Modern Photo Manager</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="app-container">
+        <!-- Sidebar -->
+        <div class="sidebar">
+            <div class="app-title">📸 PhotoVault</div>
+            
+            <div class="nav-section">
+                <div class="nav-title">Library</div>
+                <div class="nav-item active" data-view="all">
+                    <span>📷</span>
+                    <span>All Photos</span>
+                    <span class="count" id="allCount">0</span>
+                </div>
+                <div class="nav-item" data-view="people">
+                    <span>👤</span>
+                    <span>People</span>
+                    <span class="count" id="peopleCount">0</span>
+                </div>
+                <div class="nav-item" data-view="favorites">
+                    <span>⭐</span>
+                    <span>Favorites</span>
+                    <span class="count" id="favCount">0</span>
+                </div>
+            </div>
+
+            <div class="nav-section" style="flex: 1; overflow-y: auto;">
+                <div class="nav-title">Albums</div>
+                <div id="albumList"></div>
+                <button class="add-album-btn" onclick="createAlbum()">+ New Album</button>
+            </div>
+
+            <div class="sidebar-footer">
+                <div class="storage-info">
+                    <div class="storage-text">
+                        <span id="photoCount">0</span> photos
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Main Content -->
+        <div class="main-content">
+            <div class="toolbar">
+                <button class="btn-primary" onclick="importPhotos()">
+                    <span>⬆️</span>
+                    <span>Import Photos</span>
+                </button>
+                <button class="btn-secondary" onclick="toggleEditor()" id="editBtn" style="display:none;">
+                    <span>✏️</span>
+                    <span>Edit</span>
+                </button>
+                <button class="btn-secondary" onclick="deleteSelected()" id="deleteBtn" style="display:none;">
+                    <span>🗑️</span>
+                    <span>Delete</span>
+                </button>
+                <button class="btn-secondary" onclick="addToAlbum()" id="albumBtn" style="display:none;">
+                    <span>📁</span>
+                    <span>Add to Album</span>
+                </button>
+                <div class="search-box">
+                    <input type="text" id="searchInput" placeholder="Search photos..." oninput="filterPhotos()">
+                </div>
+                <div class="view-toggle">
+                    <button class="view-btn active" onclick="setView('grid')">◫</button>
+                    <button class="view-btn" onclick="setView('list')">☰</button>
+                </div>
+            </div>
+
+            <div class="gallery-container">
+                <div class="upload-zone active" onclick="importPhotos()">
+                    <div class="upload-icon">📸</div>
+                    <div class="upload-text">Click to import photos</div>
+                    <div class="upload-subtext">Supports JPG, PNG, GIF, WebP and more</div>
+                </div>
+                <div class="gallery-grid" id="gallery"></div>
+                <div class="empty-state" id="emptyState" style="display: none;">
+                    <div class="empty-icon">🖼️</div>
+                    <div class="empty-title">No photos found</div>
+                    <div class="empty-text">Try adjusting your filters or import new photos</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Editor Panel -->
+        <div class="editor-panel" id="editorPanel">
+            <div class="editor-header">
+                <div class="editor-title">Edit Photo</div>
+                <button class="close-btn" onclick="toggleEditor()">✕</button>
+            </div>
+            
+            <div class="editor-content">
+                <div class="editor-section">
+                    <h3>Filters</h3>
+                    <div class="filter-grid">
+                        <button class="filter-btn active" onclick="applyFilter('none')">Original</button>
+                        <button class="filter-btn" onclick="applyFilter('grayscale')">B&W</button>
+                        <button class="filter-btn" onclick="applyFilter('sepia')">Sepia</button>
+                        <button class="filter-btn" onclick="applyFilter('vintage')">Vintage</button>
+                        <button class="filter-btn" onclick="applyFilter('warm')">Warm</button>
+                        <button class="filter-btn" onclick="applyFilter('cool')">Cool</button>
+                        <button class="filter-btn" onclick="applyFilter('vivid')">Vivid</button>
+                        <button class="filter-btn" onclick="applyFilter('dramatic')">Dramatic</button>
+                    </div>
+                </div>
+
+                <div class="editor-section">
+                    <h3>Adjustments</h3>
+                    
+                    <div class="slider-control">
+                        <div class="slider-label">
+                            <span>Brightness</span>
+                            <span id="brightnessValue">100%</span>
+                        </div>
+                        <input type="range" class="slider" min="50" max="150" value="100" 
+                               oninput="adjustBrightness(this.value)">
+                    </div>
+
+                    <div class="slider-control">
+                        <div class="slider-label">
+                            <span>Contrast</span>
+                            <span id="contrastValue">100%</span>
+                        </div>
+                        <input type="range" class="slider" min="50" max="150" value="100" 
+                               oninput="adjustContrast(this.value)">
+                    </div>
+
+                    <div class="slider-control">
+                        <div class="slider-label">
+                            <span>Saturation</span>
+                            <span id="saturationValue">100%</span>
+                        </div>
+                        <input type="range" class="slider" min="0" max="200" value="100" 
+                               oninput="adjustSaturation(this.value)">
+                    </div>
+
+                    <div class="slider-control">
+                        <div class="slider-label">
+                            <span>Blur</span>
+                            <span id="blurValue">0px</span>
+                        </div>
+                        <input type="range" class="slider" min="0" max="10" value="0" 
+                               oninput="adjustBlur(this.value)">
+                    </div>
+                </div>
+
+                <div class="editor-section">
+                    <h3>Transform</h3>
+                    <div class="transform-buttons">
+                        <button class="btn-secondary" onclick="rotateLeft()">↶ Rotate Left</button>
+                        <button class="btn-secondary" onclick="rotateRight()">↷ Rotate Right</button>
+                        <button class="btn-secondary" onclick="flipHorizontal()">⟷ Flip H</button>
+                        <button class="btn-secondary" onclick="flipVertical()">⟱ Flip V</button>
+                    </div>
+                </div>
+
+                <div class="editor-section">
+                    <button class="btn-primary" style="width: 100%; margin-bottom: 10px;" onclick="saveEdits()">Save Changes</button>
+                    <button class="btn-secondary" style="width: 100%; margin-bottom: 10px;" onclick="resetEdits()">Reset</button>
+                    <button class="btn-secondary" style="width: 100%;" onclick="exportPhoto()">Export Photo</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal -->
+    <div class="modal" id="photoModal" onclick="closeModal(event)">
+        <button class="modal-close" onclick="closeModal(event)">×</button>
+        <div class="modal-content">
+            <img id="modalImage" class="modal-image">
+            <div class="modal-toolbar">
+                <button onclick="previousPhoto()">◀</button>
+                <button onclick="rotatePhotoModal()">↻</button>
+                <button onclick="toggleFavorite()" id="favBtn">⭐</button>
+                <button onclick="exportCurrentPhoto()">⬇</button>
+                <button onclick="nextPhoto()">▶</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Album Selection Modal -->
+    <div class="modal" id="albumModal" onclick="closeAlbumModal(event)">
+        <div class="modal-dialog" onclick="event.stopPropagation()">
+            <div class="modal-header">
+                <h3>Add to Album</h3>
+                <button class="close-btn" onclick="closeAlbumModal()">✕</button>
+            </div>
+            <div class="modal-body">
+                <div id="albumSelectList"></div>
+            </div>
+        </div>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>

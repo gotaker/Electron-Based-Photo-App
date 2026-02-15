@@ -1,0 +1,16 @@
+# Azure Web App configuration
+# For deploying PhotoVault to Azure App Service
+
+# Build settings
+SCM_DO_BUILD_DURING_DEPLOYMENT=true
+WEBSITE_NODE_DEFAULT_VERSION=18-lts
+
+# App settings
+NODE_ENV=production
+PORT=8080
+
+# Enable remote debugging (optional, for development)
+# REMOTE_DEBUGGING_PORT=9222
+
+# Custom startup command
+# npm start
