@@ -219,7 +219,7 @@ function createWindow() {
     });
 
     // Load the application
-    mainWindow.loadFile('renderer/index.html');
+    mainWindow.loadFile('renderer/diagnostic.html');
 
     // Show window when ready
     mainWindow.once('ready-to-show', async () => {
