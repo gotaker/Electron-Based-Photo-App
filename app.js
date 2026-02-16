@@ -75,8 +75,10 @@ async function importPhotos() {
         console.log(`Importing ${result.files.length} files...`);
         
         for (const file of result.files) {
-            console.log('Processing file:', file);
+            console.log('File object from dialog:', file);
+            console.log('File has these properties:', Object.keys(file));
             
+            // Use the EXACT data from the file object
             const photo = {
                 id: file.id,
                 name: file.name,
@@ -87,27 +89,33 @@ async function importPhotos() {
                 date: new Date().toLocaleDateString(),
                 dateAdded: new Date().toISOString(),
                 favorite: false,
-                faces: Math.floor(Math.random() * 4), // Simulated face detection
+                faces: Math.floor(Math.random() * 4),
                 album: null,
                 tags: [],
                 fileSize: file.fileSize
             };
             
-            console.log('Saving photo metadata:', photo);
+            console.log('Photo object to save:', photo);
+            console.log('Photo has these properties:', Object.keys(photo));
+            
             const saveResult = await window.electronAPI.savePhoto(photo);
             console.log('Save result:', saveResult);
             
-            if (saveResult.success) {
-                // Reload photos to get them with src data
-                await loadPhotos();
-            } else {
+            if (!saveResult.success) {
                 console.error('Failed to save photo:', saveResult.error);
+                alert('Failed to save photo: ' + saveResult.error);
             }
         }
+        
+        // Reload all photos from storage
+        console.log('Reloading photos from storage...');
+        await loadPhotos();
         
         renderGallery();
         updateCounts();
         updateStorageInfo();
+        
+        console.log('Import complete!');
     } else {
         console.log('No files selected or import cancelled');
     }
