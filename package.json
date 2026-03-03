@@ -25,7 +25,7 @@
   "dependencies": {
     "electron-store": "^10.0.0",
     "express": "^4.21.2",
-    "multer": "^2.0.0"
+    "multer": "^2.1.0"
   },
   "devDependencies": {
     "electron": "^40.4.1",
