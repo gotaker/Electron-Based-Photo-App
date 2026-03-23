@@ -10,7 +10,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
     updatePhoto: (photoId, updates) => ipcRenderer.invoke('update-photo', photoId, updates),
     deletePhoto: (photoId) => ipcRenderer.invoke('delete-photo', photoId),
     deletePhotos: (photoIds) => ipcRenderer.invoke('delete-photos', photoIds),
-    
+    applyPhotoEdits: (photoId, editPayload) =>
+        ipcRenderer.invoke('apply-photo-edits', photoId, editPayload),
+
     // Album operations
     saveAlbum: (albumData) => ipcRenderer.invoke('save-album', albumData),
     getAlbums: () => ipcRenderer.invoke('get-albums'),
@@ -26,5 +28,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
     changeStorageLocation: () => ipcRenderer.invoke('change-storage-location'),
     
     // Utility
-    clearAllData: () => ipcRenderer.invoke('clear-all-data')
+    clearAllData: () => ipcRenderer.invoke('clear-all-data'),
+
+    // Azure (optional; returns status when not configured)
+    getAzureSyncStatus: () => ipcRenderer.invoke('azure-sync-status'),
+    syncAzureBlob: (options) => ipcRenderer.invoke('azure-blob-sync', options)
 });

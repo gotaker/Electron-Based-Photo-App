@@ -29,6 +29,11 @@
                     <span>Favorites</span>
                     <span class="count" id="favCount">0</span>
                 </div>
+                <div class="nav-item" data-view="timeline">
+                    <span>📅</span>
+                    <span>Timeline</span>
+                    <span class="count" id="timelineCount">0</span>
+                </div>
             </div>
 
             <div class="nav-section" style="flex: 1; overflow-y: auto;">
@@ -42,6 +47,7 @@
                     <div class="storage-text">
                         <span id="photoCount">0</span> photos
                     </div>
+                    <button type="button" class="btn-secondary sync-azure-btn" onclick="syncAzure()" title="Upload local library to Azure Blob when configured">☁️ Sync</button>
                 </div>
             </div>
         </div>
@@ -69,8 +75,8 @@
                     <input type="text" id="searchInput" placeholder="Search photos..." oninput="filterPhotos()">
                 </div>
                 <div class="view-toggle">
-                    <button class="view-btn active" onclick="setView('grid')">◫</button>
-                    <button class="view-btn" onclick="setView('list')">☰</button>
+                    <button class="view-btn active" onclick="setView('grid', event)">◫</button>
+                    <button class="view-btn" onclick="setView('list', event)">☰</button>
                 </div>
             </div>
 
@@ -100,14 +106,14 @@
                 <div class="editor-section">
                     <h3>Filters</h3>
                     <div class="filter-grid">
-                        <button class="filter-btn active" onclick="applyFilter('none')">Original</button>
-                        <button class="filter-btn" onclick="applyFilter('grayscale')">B&W</button>
-                        <button class="filter-btn" onclick="applyFilter('sepia')">Sepia</button>
-                        <button class="filter-btn" onclick="applyFilter('vintage')">Vintage</button>
-                        <button class="filter-btn" onclick="applyFilter('warm')">Warm</button>
-                        <button class="filter-btn" onclick="applyFilter('cool')">Cool</button>
-                        <button class="filter-btn" onclick="applyFilter('vivid')">Vivid</button>
-                        <button class="filter-btn" onclick="applyFilter('dramatic')">Dramatic</button>
+                        <button class="filter-btn active" onclick="applyFilter('none', event)">Original</button>
+                        <button class="filter-btn" onclick="applyFilter('grayscale', event)">B&W</button>
+                        <button class="filter-btn" onclick="applyFilter('sepia', event)">Sepia</button>
+                        <button class="filter-btn" onclick="applyFilter('vintage', event)">Vintage</button>
+                        <button class="filter-btn" onclick="applyFilter('warm', event)">Warm</button>
+                        <button class="filter-btn" onclick="applyFilter('cool', event)">Cool</button>
+                        <button class="filter-btn" onclick="applyFilter('vivid', event)">Vivid</button>
+                        <button class="filter-btn" onclick="applyFilter('dramatic', event)">Dramatic</button>
                     </div>
                 </div>
 

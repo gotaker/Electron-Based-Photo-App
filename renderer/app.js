@@ -6,6 +6,7 @@ let selectedPhotos = new Set();
 let currentPhotoIndex = 0;
 let currentEditingPhoto = null;
 let searchQuery = '';
+let galleryVisibleCount = 48;
 
 // Editor state
 let currentFilter = 'none';
@@ -54,31 +55,62 @@ async function loadAlbums() {
 // File handling
 async function importPhotos() {
     const result = await window.electronAPI.openFileDialog();
-    
+
     if (result.success && result.files.length > 0) {
         for (const file of result.files) {
-            const photo = {
-                id: Date.now() + Math.random(),
+            const displayDate = file.displayDate || new Date().toLocaleDateString();
+            const metadata = {
+                id: file.id,
                 name: file.name,
-                src: file.data,
-                originalPath: file.path,
-                date: new Date().toLocaleDateString(),
-                dateAdded: new Date().toISOString(),
+                storagePath: file.storagePath,
+                relativePath: file.relativePath,
+                thumbnailPath: file.thumbnailPath,
+                originalPath: file.originalPath,
+                date: displayDate,
+                dateAdded: file.dateAdded || new Date().toISOString(),
+                captureDateISO: file.captureDateISO || null,
                 favorite: false,
-                faces: Math.floor(Math.random() * 4), // Simulated face detection
+                faces: file.faces != null ? file.faces : Math.floor(Math.random() * 4),
                 album: null,
-                tags: []
+                tags: [],
+                fileSize: file.fileSize || 0
             };
-            
-            const saveResult = await window.electronAPI.savePhoto(photo);
-            if (saveResult.success) {
-                photos.push(photo);
+
+            const saveResult = await window.electronAPI.savePhoto(metadata);
+            if (!saveResult.success) {
+                console.error('savePhoto failed:', saveResult.error);
             }
         }
-        
+
+        await loadPhotos();
+        galleryVisibleCount = 48;
         renderGallery();
         updateCounts();
     }
+}
+
+function photoCardHtml(photo) {
+    return `
+        <div class="photo-card" data-photo-id="${escapeAttr(photo.id)}" onclick="openPhoto('${escapeJsString(photo.id)}')">
+            <img src="${photo.src}" alt="${escapeAttr(photo.name)}">
+            <div class="photo-select ${selectedPhotos.has(photo.id) ? 'selected' : ''}" 
+                 onclick="event.stopPropagation(); toggleSelect('${escapeJsString(photo.id)}')"></div>
+            ${photo.faces > 0 ? `<div class="face-badge">👤 ${photo.faces} ${photo.faces === 1 ? 'person' : 'people'}</div>` : ''}
+            ${photo.favorite ? '<div class="face-badge" style="left: auto; right: 10px; background: #f39c12;">⭐</div>' : ''}
+            <div class="photo-info">
+                <div class="photo-name">${escapeHtml(photo.name)}</div>
+                <div class="photo-date">${escapeHtml(photo.date || '')}</div>
+            </div>
+        </div>
+    `;
+}
+
+function sortPhotosForTimeline(list) {
+    return [...list].sort((a, b) => {
+        const d1 = new Date(a.captureDateISO || a.dateAdded || 0).getTime();
+        const d2 = new Date(b.captureDateISO || b.dateAdded || 0).getTime();
+        return d2 - d1;
+    });
 }
 
 // Render functions
@@ -107,21 +139,72 @@ function renderGallery() {
     gallery.style.display = 'grid';
     emptyState.style.display = 'none';
 
-    gallery.innerHTML = filteredPhotos.map((photo) => `
-        <div class="photo-card" onclick="openPhoto('${photo.id}')">
-            <img src="${photo.src}" alt="${photo.name}">
-            <div class="photo-select ${selectedPhotos.has(photo.id) ? 'selected' : ''}" 
-                 onclick="event.stopPropagation(); toggleSelect('${photo.id}')"></div>
-            ${photo.faces > 0 ? `<div class="face-badge">👤 ${photo.faces} ${photo.faces === 1 ? 'person' : 'people'}</div>` : ''}
-            ${photo.favorite ? '<div class="face-badge" style="left: auto; right: 10px; background: #f39c12;">⭐</div>' : ''}
-            <div class="photo-info">
-                <div class="photo-name">${photo.name}</div>
-                <div class="photo-date">${photo.date}</div>
-            </div>
-        </div>
-    `).join('');
+    let listForPaging = filteredPhotos;
+    if (currentView === 'timeline') {
+        listForPaging = sortPhotosForTimeline(filteredPhotos);
+    }
+
+    const visible = listForPaging.slice(0, galleryVisibleCount);
+
+    let html = '';
+    if (currentView === 'timeline') {
+        let lastMonth = '';
+        for (const photo of visible) {
+            const raw = photo.captureDateISO || photo.dateAdded;
+            const d = new Date(raw || Date.now());
+            const month = d.toLocaleString('default', { month: 'long', year: 'numeric' });
+            if (month !== lastMonth) {
+                html += `<h3 class="timeline-heading">${escapeHtml(month)}</h3>`;
+                lastMonth = month;
+            }
+            html += photoCardHtml(photo);
+        }
+    } else {
+        html = visible.map((photo) => photoCardHtml(photo)).join('');
+    }
+
+    gallery.innerHTML = html;
+
+    if (galleryVisibleCount < listForPaging.length) {
+        gallery.insertAdjacentHTML('beforeend', `<div id="galleryLoadMore" class="gallery-load-more">Loading more…</div>`);
+        observeGallerySentinel(listForPaging.length);
+    }
 
     updateToolbar();
+}
+
+function escapeHtml(s) {
+    return String(s)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
+}
+
+function escapeAttr(s) {
+    return escapeHtml(s);
+}
+
+function escapeJsString(s) {
+    return String(s).replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+}
+
+let galleryObserver = null;
+
+function observeGallerySentinel(totalFiltered) {
+    const sentinel = document.getElementById('galleryLoadMore');
+    if (!sentinel) return;
+    if (galleryObserver) galleryObserver.disconnect();
+    galleryObserver = new IntersectionObserver(
+        (entries) => {
+            if (!entries[0].isIntersecting) return;
+            if (galleryVisibleCount >= totalFiltered) return;
+            galleryVisibleCount = Math.min(galleryVisibleCount + 48, totalFiltered);
+            renderGallery();
+        },
+        { root: null, rootMargin: '400px' }
+    );
+    galleryObserver.observe(sentinel);
 }
 
 function getFilteredPhotos() {
@@ -134,14 +217,17 @@ function getFilteredPhotos() {
         filtered = filtered.filter(p => p.faces > 0);
     } else if (typeof currentView === 'number') {
         filtered = filtered.filter(p => p.album === currentView);
+    } else if (currentView === 'timeline') {
+        // same as all; ordering handled in renderGallery
     }
 
     // Filter by search
     if (searchQuery) {
         const query = searchQuery.toLowerCase();
-        filtered = filtered.filter(p => 
+        filtered = filtered.filter(p =>
             p.name.toLowerCase().includes(query) ||
-            p.date.toLowerCase().includes(query) ||
+            (p.date && p.date.toLowerCase().includes(query)) ||
+            (p.captureDateISO && p.captureDateISO.toLowerCase().includes(query)) ||
             (p.tags && p.tags.some(tag => tag.toLowerCase().includes(query)))
         );
     }
@@ -151,6 +237,7 @@ function getFilteredPhotos() {
 
 function filterPhotos() {
     searchQuery = document.getElementById('searchInput').value;
+    galleryVisibleCount = 48;
     renderGallery();
 }
 
@@ -205,6 +292,7 @@ async function deleteAlbum(albumId) {
 
 function switchView(view) {
     currentView = view;
+    galleryVisibleCount = 48;
     document.querySelectorAll('.nav-item').forEach(item => {
         item.classList.remove('active');
     });
@@ -220,6 +308,7 @@ document.querySelectorAll('.nav-item').forEach(item => {
         document.querySelectorAll('.nav-item').forEach(i => i.classList.remove('active'));
         item.classList.add('active');
         currentView = item.dataset.view;
+        galleryVisibleCount = 48;
         renderGallery();
     });
 });
@@ -300,13 +389,25 @@ function closeAlbumModal(event) {
 }
 
 // Modal
-function openPhoto(photoId) {
+async function openPhoto(photoId) {
     const photo = photos.find(p => p.id === photoId);
     if (!photo) return;
-    
+
     currentPhotoIndex = photos.indexOf(photo);
-    document.getElementById('modalImage').src = photo.src;
-    document.getElementById('photoModal').classList.add('active');
+    const modal = document.getElementById('photoModal');
+    const img = document.getElementById('modalImage');
+    img.style.transform = '';
+    modal.classList.add('active');
+    img.alt = photo.name;
+    img.removeAttribute('src');
+    img.src = '';
+
+    const full = await window.electronAPI.getFullPhoto(photoId);
+    if (full.success && full.photo && full.photo.src) {
+        img.src = full.photo.src;
+    } else {
+        img.src = photo.src;
+    }
     updateFavoriteButton();
 }
 
@@ -360,7 +461,7 @@ function updateFavoriteButton() {
 
 async function exportCurrentPhoto() {
     const photo = photos[currentPhotoIndex];
-    const result = await window.electronAPI.exportPhoto(photo.src, photo.name);
+    const result = await window.electronAPI.exportPhoto(photo.id, photo.name);
     if (result.success) {
         alert('Photo exported successfully!');
     }
@@ -401,10 +502,11 @@ function resetEditorControls() {
     updatePreview();
 }
 
-function applyFilter(filter) {
+function applyFilter(filter, ev) {
     currentFilter = filter;
     document.querySelectorAll('.filter-btn').forEach(btn => btn.classList.remove('active'));
-    event.target.classList.add('active');
+    const t = (ev && ev.target) || (typeof event !== 'undefined' ? event.target : null);
+    if (t && t.classList) t.classList.add('active');
     updatePreview();
 }
 
@@ -454,8 +556,8 @@ function flipVertical() {
 
 function updatePreview() {
     if (!currentEditingPhoto) return;
-    
-    const photoCard = document.querySelector(`[onclick*="${currentEditingPhoto.id}"] img`);
+
+    const photoCard = document.querySelector(`.photo-card[data-photo-id="${currentEditingPhoto.id}"] img`);
     if (!photoCard) return;
 
     let filterCSS = '';
@@ -493,18 +595,32 @@ function updatePreview() {
 
 async function saveEdits() {
     if (!currentEditingPhoto) return;
-    
-    // In a production app, you would apply the edits to the actual image
-    // For now, we'll just show a confirmation
-    alert('Edits saved! In a full version, this would permanently apply changes to the image.');
-    
-    // Reset the preview
-    const photoCard = document.querySelector(`[onclick*="${currentEditingPhoto.id}"] img`);
+
+    const payload = {
+        filter: currentFilter,
+        brightness: Number(brightness),
+        contrast: Number(contrast),
+        saturation: Number(saturation),
+        blur: Number(blur),
+        rotation: Number(rotation),
+        flipH,
+        flipV
+    };
+    const result = await window.electronAPI.applyPhotoEdits(currentEditingPhoto.id, payload);
+    if (!result.success) {
+        alert(result.error || 'Could not save edits');
+        return;
+    }
+
+    const photoCard = document.querySelector(`.photo-card[data-photo-id="${currentEditingPhoto.id}"] img`);
     if (photoCard) {
         photoCard.style.filter = '';
         photoCard.style.transform = '';
     }
-    
+
+    await loadPhotos();
+    galleryVisibleCount = Math.max(galleryVisibleCount, photos.length);
+    renderGallery();
     toggleEditor();
 }
 
@@ -514,17 +630,18 @@ function resetEdits() {
 
 async function exportPhoto() {
     if (!currentEditingPhoto) return;
-    
-    const result = await window.electronAPI.exportPhoto(currentEditingPhoto.src, currentEditingPhoto.name);
+
+    const result = await window.electronAPI.exportPhoto(currentEditingPhoto.id, currentEditingPhoto.name);
     if (result.success) {
         alert('Photo exported successfully!');
     }
 }
 
-function setView(view) {
+function setView(view, ev) {
     document.querySelectorAll('.view-btn').forEach(btn => btn.classList.remove('active'));
-    event.target.classList.add('active');
-    
+    const t = (ev && ev.target) || (typeof event !== 'undefined' ? event.target : null);
+    if (t && t.classList) t.classList.add('active');
+
     const gallery = document.getElementById('gallery');
     if (view === 'list') {
         gallery.classList.add('list-view');
@@ -538,6 +655,21 @@ function updateCounts() {
     document.getElementById('allCount').textContent = photos.length;
     document.getElementById('peopleCount').textContent = photos.filter(p => p.faces > 0).length;
     document.getElementById('favCount').textContent = photos.filter(p => p.favorite).length;
+    const tl = document.getElementById('timelineCount');
+    if (tl) tl.textContent = photos.length;
+}
+
+async function syncAzure() {
+    const result = await window.electronAPI.syncAzureBlob({});
+    if (result.skipped) {
+        alert(result.message || 'Azure Blob sync is not configured.');
+        return;
+    }
+    if (result.success) {
+        alert(`Uploaded ${result.uploaded} file(s) to container "${result.container}".`);
+    } else {
+        alert(result.error || 'Sync failed');
+    }
 }
 
 // Keyboard shortcuts

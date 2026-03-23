@@ -52,31 +52,33 @@ PhotoVault is a modern, desktop photo management application built with Electron
 
 ```
 photovault-app/
-├── main.js                    # Electron main process
+├── main.mjs                  # Electron main process (ES modules)
 ├── preload.js                # IPC bridge (security)
 ├── package.json              # Dependencies & scripts
-│
+├── services/
+│   └── azureSync.mjs         # Optional Azure Blob + Face API
+├── lib/                      # Shared helpers (tests / utilities)
 ├── renderer/                 # Frontend application
-│   ├── index.html           # Main UI
-│   ├── styles.css           # All styles
-│   └── app.js               # Application logic
-│
+│   ├── index.html            # Main UI
+│   ├── styles.css            # All styles
+│   └── app.js                # Application logic
+├── tests/                    # Jest + Node tests
+├── e2e/                      # Playwright smoke tests
 ├── build/                    # App icons
-│   └── ICON_README.md       # Icon requirements
-│
+│   └── ICON_README.md        # Icon requirements
 ├── .github/
 │   └── workflows/
-│       └── azure-deploy.yml # CI/CD pipeline
-│
-├── Dockerfile               # Container config
-├── docker-compose.yml       # Local docker setup
-├── deploy-azure.sh          # Azure deployment script
-├── quickstart.sh            # Quick setup script
-│
-├── README.md                # Main documentation
+│       └── azure-deploy.yml  # CI/CD pipeline
+├── Dockerfile                # Container config
+├── docker-compose.yml        # Local docker setup
+├── deploy-azure.sh           # Azure deployment script
+├── quickstart.sh             # Quick setup script
+├── README.md                 # Main documentation
 ├── AZURE_DEPLOYMENT_GUIDE.md # Azure setup guide
-└── .gitignore              # Git exclusions
+└── .gitignore                # Git exclusions
 ```
+
+**Dependencies note:** `express` / `multer` were removed; the app is IPC + file-based storage. Optional Azure uploads use `@azure/storage-blob` when `AZURE_STORAGE_CONNECTION_STRING` is set.
 
 ## 🚀 Getting Started
 
@@ -141,7 +143,7 @@ See `AZURE_DEPLOYMENT_GUIDE.md` for detailed instructions on:
 ### Adding Features
 
 1. **Backend Logic**
-   - Edit `main.js`
+   - Edit `main.mjs`
    - Add IPC handlers for communication
 
 2. **Frontend Logic**
@@ -163,7 +165,7 @@ See `AZURE_DEPLOYMENT_GUIDE.md` for detailed instructions on:
 // Add to package.json
 "@azure/storage-blob": "^12.x.x"
 
-// In main.js
+// In main.mjs
 const { BlobServiceClient } = require('@azure/storage-blob');
 ```
 
@@ -172,7 +174,7 @@ const { BlobServiceClient } = require('@azure/storage-blob');
 // Add to package.json
 "@azure/cognitiveservices-face": "^5.x.x"
 
-// In main.js
+// In main.mjs
 const { FaceClient } = require('@azure/cognitiveservices-face');
 ```
 
@@ -188,12 +190,14 @@ Data is stored locally in:
 ### Data Structure
 
 ```javascript
-// Photos
+// Photos (renderer receives thumbnails as base64 `src` from main)
 {
-  id: "unique-id",
+  id: "hex-id",
   name: "photo.jpg",
-  src: "data:image/jpeg;base64,...",
-  date: "2/14/2026",
+  storagePath: "/abs/path/...",
+  thumbnailPath: "/abs/thumbnails/hex-id.jpg",
+  captureDateISO: "2024-06-15T12:00:00.000Z", // from EXIF when available
+  date: "6/15/2024",
   favorite: false,
   faces: 2,
   album: null,
@@ -259,11 +263,11 @@ Consider adding:
 - [x] Azure deployment setup
 
 ### Phase 2: Enhanced Features
-- [ ] Real AI face recognition (Azure Cognitive Services)
-- [ ] Cloud sync (Azure Blob Storage)
+- [x] Real face counts via Azure Face API (optional; env `AZURE_FACE_*`)
+- [x] Cloud sync (Azure Blob Storage; optional; env `AZURE_STORAGE_*`)
 - [ ] Advanced editing (crop, resize)
-- [ ] Timeline view
-- [ ] Metadata editing (EXIF)
+- [x] Timeline view (grouped by month; EXIF dates)
+- [x] Metadata editing (EXIF read on import; display + timeline)
 
 ### Phase 3: Advanced Features
 - [ ] Video support
@@ -281,17 +285,13 @@ Consider adding:
 
 ## 🐛 Known Limitations
 
-1. **Face Detection** - Currently simulated (random numbers)
-   - Solution: Integrate Azure Face API
+1. **Face Detection** - Random counts on import unless `AZURE_FACE_ENDPOINT` and `AZURE_FACE_KEY` are set.
 
-2. **Photo Editing** - CSS filters only (not permanent)
-   - Solution: Use Canvas API or Sharp library
+2. **Photo Editing** - JPEG, PNG, and WebP can be saved via Sharp; GIF/BMP and others are not editable in place.
 
-3. **Cloud Sync** - Not implemented
-   - Solution: Integrate Azure Blob Storage
+3. **Cloud Sync** - Upload-only stub; conflict policy is local-canonical with last upload overwriting blobs (see `services/azureSync.mjs`).
 
-4. **Large Libraries** - May slow down with 1000+ photos
-   - Solution: Implement virtualization/pagination
+4. **Large Libraries** - Gallery uses incremental loading (IntersectionObserver); very large sets may still need further tuning.
 
 5. **RAW Format** - Not supported
    - Solution: Add RAW processing library

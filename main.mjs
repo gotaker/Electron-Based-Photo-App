@@ -5,6 +5,9 @@ import { fileURLToPath } from 'url';
 import { dirname } from 'path';
 import Store from 'electron-store';
 import crypto from 'crypto';
+import sharp from 'sharp';
+import exifr from 'exifr';
+import { getAzureSyncStatus, syncAzureBlob, analyzeFaceCountForImageFile } from './services/azureSync.mjs';
 
 // ES modules don't have __dirname, so we need to create it
 const __filename = fileURLToPath(import.meta.url);
@@ -122,23 +125,107 @@ async function copyPhotoToStorage(sourcePath, photoId) {
     };
 }
 
-// Create thumbnail (simple copy, resized in browser)
+async function readExifMetadata(filePath) {
+    try {
+        const exif = await exifr.parse(filePath, {
+            pick: ['DateTimeOriginal', 'CreateDate', 'ModifyDate', 'Make', 'Model']
+        });
+        if (!exif) return {};
+        const raw = exif.DateTimeOriginal || exif.CreateDate || exif.ModifyDate;
+        let dt = raw;
+        if (typeof raw === 'string') {
+            dt = new Date(raw);
+        }
+        if (!(dt instanceof Date) || Number.isNaN(dt.getTime())) {
+            return {};
+        }
+        return {
+            captureDateISO: dt.toISOString(),
+            displayDate: dt.toLocaleDateString(),
+            cameraMake: exif.Make || null,
+            cameraModel: exif.Model || null
+        };
+    } catch (e) {
+        console.warn('EXIF read skipped:', e.message);
+        return {};
+    }
+}
+
+// Create thumbnail (resized for gallery performance)
 async function createThumbnail(sourcePath, photoId) {
     if (!thumbsDir) {
         throw new Error('Storage not initialized - thumbsDir is null');
     }
-    
-    const ext = path.extname(sourcePath);
-    const thumbPath = path.join(thumbsDir, `${photoId}${ext}`);
-    
+
+    const thumbPath = path.join(thumbsDir, `${photoId}.jpg`);
+
     console.log('Creating thumbnail from', sourcePath, 'to', thumbPath);
-    
-    // Just copy the file (browser will resize it)
-    fs.copyFileSync(sourcePath, thumbPath);
-    
+
+    await sharp(sourcePath)
+        .rotate()
+        .resize(400, 400, { fit: 'inside', withoutEnlargement: true })
+        .jpeg({ quality: 85 })
+        .toFile(thumbPath);
+
     console.log('Thumbnail created successfully');
-    
+
     return thumbPath;
+}
+
+function buildEditedImagePipeline(sourcePath, edits) {
+    const {
+        filter = 'none',
+        brightness = 100,
+        contrast = 100,
+        saturation = 100,
+        blur = 0,
+        rotation = 0,
+        flipH = false,
+        flipV = false
+    } = edits;
+
+    let pipeline = sharp(sourcePath).rotate(rotation);
+    if (flipH) pipeline = pipeline.flop();
+    if (flipV) pipeline = pipeline.flip();
+    if (blur > 0) {
+        pipeline = pipeline.blur(Math.min(10, Math.max(0.1, blur)));
+    }
+
+    switch (filter) {
+        case 'grayscale':
+            pipeline = pipeline.grayscale();
+            break;
+        case 'sepia':
+            pipeline = pipeline.grayscale().tint({ r: 243, g: 229, b: 171 });
+            break;
+        case 'vintage':
+            pipeline = pipeline.modulate({ saturation: 0.85 }).gamma(1.05);
+            break;
+        case 'warm':
+            pipeline = pipeline.tint({ r: 255, g: 235, b: 210 });
+            break;
+        case 'cool':
+            pipeline = pipeline.tint({ r: 210, g: 230, b: 255 });
+            break;
+        case 'vivid':
+            pipeline = pipeline.modulate({ saturation: 1.45, brightness: 1.05 });
+            break;
+        case 'dramatic':
+            pipeline = pipeline.gamma(0.92).linear(1.15, -18);
+            break;
+        default:
+            break;
+    }
+
+    const b = Math.max(0.25, Math.min(2, brightness / 100));
+    const s = Math.max(0, Math.min(2, saturation / 100));
+    pipeline = pipeline.modulate({ brightness: b, saturation: s });
+
+    const c = Math.max(0.5, Math.min(1.5, contrast / 100));
+    const gamma = 1 / c;
+    pipeline = pipeline.gamma(gamma);
+
+    return pipeline;
 }
 
 // Get file as base64 (for displaying in browser)
@@ -186,7 +273,11 @@ function deletePhotoFiles(photoId, relativePath) {
             fs.unlinkSync(photoPath);
         }
         
-        // Delete thumbnail (check for multiple extensions)
+        const thumbJpg = path.join(thumbsDir, `${photoId}.jpg`);
+        if (fs.existsSync(thumbJpg)) {
+            console.log('Deleting thumbnail:', thumbJpg);
+            fs.unlinkSync(thumbJpg);
+        }
         const thumbExtensions = ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp'];
         for (const ext of thumbExtensions) {
             const thumbPath = path.join(thumbsDir, `${photoId}${ext}`);
@@ -219,7 +310,7 @@ function createWindow() {
     });
 
     // Load the application
-    mainWindow.loadFile('renderer/diagnostic.html');
+    mainWindow.loadFile('renderer/index.html');
 
     // Show window when ready
     mainWindow.once('ready-to-show', async () => {
@@ -275,6 +366,9 @@ ipcMain.handle('save-photo', async (event, photoData) => {
             originalPath: photoData.originalPath,
             date: photoData.date,
             dateAdded: photoData.dateAdded,
+            captureDateISO: photoData.captureDateISO || null,
+            cameraMake: photoData.cameraMake || null,
+            cameraModel: photoData.cameraModel || null,
             favorite: photoData.favorite || false,
             faces: photoData.faces || 0,
             album: photoData.album || null,
@@ -429,6 +523,52 @@ ipcMain.handle('delete-photos', async (event, photoIds) => {
     }
 });
 
+ipcMain.handle('apply-photo-edits', async (event, photoId, edits) => {
+    try {
+        const photos = store.get('photos', []);
+        const index = photos.findIndex(p => p.id === photoId);
+        if (index === -1) {
+            return { success: false, error: 'Photo not found' };
+        }
+        const photo = photos[index];
+        const ext = path.extname(photo.storagePath).toLowerCase();
+        const supported = ['.jpg', '.jpeg', '.png', '.webp'];
+        if (!supported.includes(ext)) {
+            return { success: false, error: 'Editing is supported for JPEG, PNG, and WebP only.' };
+        }
+        const pipeline = buildEditedImagePipeline(photo.storagePath, edits);
+        let buffer;
+        if (ext === '.png') {
+            buffer = await pipeline.png().toBuffer();
+        } else if (ext === '.webp') {
+            buffer = await pipeline.webp({ quality: 90 }).toBuffer();
+        } else {
+            buffer = await pipeline.jpeg({ quality: 92 }).toBuffer();
+        }
+        fs.writeFileSync(photo.storagePath, buffer);
+        const stats = fs.statSync(photo.storagePath);
+        const newThumb = await createThumbnail(photo.storagePath, photoId);
+        photos[index] = {
+            ...photo,
+            fileSize: stats.size,
+            thumbnailPath: newThumb
+        };
+        store.set('photos', photos);
+        return { success: true };
+    } catch (error) {
+        console.error('apply-photo-edits:', error);
+        return { success: false, error: error.message };
+    }
+});
+
+ipcMain.handle('azure-sync-status', async () => {
+    return getAzureSyncStatus();
+});
+
+ipcMain.handle('azure-blob-sync', async (event, options) => {
+    return syncAzureBlob(store, options);
+});
+
 // Album operations
 ipcMain.handle('save-album', async (event, albumData) => {
     try {
@@ -534,7 +674,14 @@ ipcMain.handle('open-file-dialog', async () => {
                 
                 // Get file stats
                 const stats = fs.statSync(filePath);
-                
+                const exif = await readExifMetadata(filePath);
+
+                let faces = Math.floor(Math.random() * 4);
+                const faceResult = await analyzeFaceCountForImageFile(filePath);
+                if (typeof faceResult.faces === 'number') {
+                    faces = faceResult.faces;
+                }
+
                 const fileData = {
                     id: photoId,
                     name: path.basename(filePath),
@@ -542,9 +689,15 @@ ipcMain.handle('open-file-dialog', async () => {
                     relativePath: relativePath,
                     thumbnailPath: thumbnailPath,
                     originalPath: filePath,
-                    fileSize: stats.size
+                    fileSize: stats.size,
+                    dateAdded: new Date().toISOString(),
+                    date: exif.displayDate || new Date().toLocaleDateString(),
+                    captureDateISO: exif.captureDateISO || null,
+                    cameraMake: exif.cameraMake || null,
+                    cameraModel: exif.cameraModel || null,
+                    faces
                 };
-                
+
                 files.push(fileData);
                 
                 console.log(`✅ Imported: ${path.basename(filePath)}`);
@@ -566,7 +719,7 @@ ipcMain.handle('export-photo', async (event, photoId, defaultName) => {
     const result = await dialog.showSaveDialog(mainWindow, {
         defaultPath: defaultName,
         filters: [
-            { name: 'Images', extensions: ['jpg', 'png'] }
+            { name: 'Images', extensions: ['jpg', 'jpeg', 'png', 'webp', 'gif'] }
         ]
     });
 

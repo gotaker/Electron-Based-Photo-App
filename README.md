@@ -193,17 +193,22 @@ docker run -p 3000:3000 -v photovault-data:/app/data photovault
 
 ```
 photovault-app/
-├── main.js                 # Electron main process
+├── main.mjs               # Electron main process (ES modules)
 ├── preload.js             # Preload script for IPC
 ├── package.json           # Project configuration
+├── services/
+│   └── azureSync.mjs      # Optional Azure Blob sync + Face API helpers
+├── lib/                   # Shared helpers (e.g. string utils for tests)
 ├── renderer/              # Frontend files
-│   ├── index.html        # Main HTML
-│   ├── styles.css        # Styles
-│   └── app.js            # Application logic
-├── Dockerfile            # Docker configuration
-├── docker-compose.yml    # Docker Compose config
-├── deploy-azure.sh       # Azure deployment script
-└── README.md             # This file
+│   ├── index.html         # Main HTML
+│   ├── styles.css         # Styles
+│   └── app.js             # Application logic
+├── tests/                 # Jest + Node test runner
+├── e2e/                   # Playwright smoke tests
+├── Dockerfile             # Docker configuration
+├── docker-compose.yml     # Docker Compose config
+├── deploy-azure.sh        # Azure deployment script
+└── README.md              # This file
 ```
 
 ## ⌨️ Keyboard Shortcuts
@@ -219,12 +224,14 @@ photovault-app/
 ### Environment Variables
 
 - `NODE_ENV` - Environment mode (development/production)
-- `PORT` - Server port (default: 3000)
-- `DISPLAY` - X11 display for headless mode
+- `DISPLAY` - X11 display for headless / Docker desktop mode
+- `AZURE_STORAGE_CONNECTION_STRING` - Optional; enables **☁️ Sync** to upload local files to Azure Blob
+- `AZURE_STORAGE_CONTAINER` - Blob container name (default: `photovault`)
+- `AZURE_FACE_ENDPOINT` + `AZURE_FACE_KEY` - Optional; on import, replaces random face counts with Azure Face API detection
 
 ### Azure Configuration
 
-Edit `.azure-config` to customize Azure deployment settings.
+Edit `.azure-config` to customize Azure deployment settings for CI/hosting. Blob and Face keys are read from environment variables in the desktop app.
 
 ## 📦 Building Installers
 
@@ -250,12 +257,23 @@ Installers will be created in the `dist/` directory.
 - **Electron** - Desktop app framework
 - **Node.js** - Runtime environment
 - **electron-store** - Persistent data storage
+- **Sharp** - Thumbnails and persisted edits
+- **exifr** - EXIF dates for timeline and display
+- **@azure/storage-blob** - Optional cloud sync
 - **Vanilla JavaScript** - No framework dependencies for simplicity
+
+### Tests
+
+```bash
+npm test          # Jest unit tests + Node test runner
+npm run test:e2e  # Playwright (install browsers: npx playwright install chromium)
+npm run test:all  # Both
+```
 
 ### Adding Features
 
-1. **Backend Logic** - Add to `main.js`
-2. **IPC Handlers** - Add handlers in `main.js` and expose in `preload.js`
+1. **Backend Logic** - Add to `main.mjs`
+2. **IPC Handlers** - Add handlers in `main.mjs` and expose in `preload.js`
 3. **Frontend Logic** - Add to `renderer/app.js`
 4. **Styles** - Update `renderer/styles.css`
 
@@ -268,12 +286,12 @@ Installers will be created in the `dist/` directory.
 
 ## 📝 Future Enhancements
 
-- [ ] Real AI-powered face recognition (Azure Cognitive Services)
-- [ ] Cloud sync with Azure Storage
-- [ ] Advanced photo editing (crop, filters, effects)
-- [ ] Timeline view
+- [x] Timeline view (grouped by month; uses EXIF capture date when available)
+- [x] EXIF-based dates + optional Azure Face counts on import
+- [x] Persisted edits (Sharp) for JPEG/PNG/WebP
+- [x] Optional Azure Blob sync (env-configured)
+- [ ] Crop / resize tools
 - [ ] Photo sharing
-- [ ] Metadata editing (EXIF)
 - [ ] Duplicate detection
 - [ ] Batch operations
 - [ ] Import from cameras/phones
