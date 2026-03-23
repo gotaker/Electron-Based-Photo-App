@@ -3,207 +3,512 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>PhotoVault - Modern Photo Manager</title>
+    <title>PhotoVault</title>
     <link rel="stylesheet" href="styles.css">
 </head>
 <body>
-    <div class="app-container">
-        <!-- Sidebar -->
-        <div class="sidebar">
-            <div class="app-title">📸 PhotoVault</div>
-            
+
+<!-- ═══════════════════════════════════════════════════════
+     SF Symbols–style SVG sprite library
+     All strokes: viewBox 0 0 24 24, width 1.65,
+     linecap round, linejoin round
+     ═══════════════════════════════════════════════════════ -->
+<svg xmlns="http://www.w3.org/2000/svg" style="display:none">
+
+  <!-- magnifyingglass -->
+  <symbol id="ic-search" viewBox="0 0 24 24" fill="none"
+          stroke="currentColor" stroke-width="1.65"
+          stroke-linecap="round" stroke-linejoin="round">
+    <circle cx="10.5" cy="10.5" r="6.5"/>
+    <line x1="15.5" y1="15.5" x2="21" y2="21"/>
+  </symbol>
+
+  <!-- photo -->
+  <symbol id="ic-photo" viewBox="0 0 24 24" fill="none"
+          stroke="currentColor" stroke-width="1.65"
+          stroke-linecap="round" stroke-linejoin="round">
+    <rect x="2" y="3.5" width="20" height="16" rx="2.5"/>
+    <circle cx="8" cy="8.5" r="1.75"/>
+    <polyline points="2,15.5 7.5,10.5 11.5,14 15,11 22,16"/>
+  </symbol>
+
+  <!-- person.2 -->
+  <symbol id="ic-people" viewBox="0 0 24 24" fill="none"
+          stroke="currentColor" stroke-width="1.65"
+          stroke-linecap="round" stroke-linejoin="round">
+    <circle cx="9" cy="7" r="3.5"/>
+    <path d="M2 21v-1.5A5.5 5.5 0 0 1 7.5 14h3A5.5 5.5 0 0 1 16 19.5V21"/>
+    <path d="M16.5 3.5a3.5 3.5 0 0 1 0 7"/>
+    <path d="M20 21v-1a4.5 4.5 0 0 0-3-4.24"/>
+  </symbol>
+
+  <!-- heart -->
+  <symbol id="ic-heart" viewBox="0 0 24 24" fill="none"
+          stroke="currentColor" stroke-width="1.65"
+          stroke-linecap="round" stroke-linejoin="round">
+    <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/>
+  </symbol>
+
+  <!-- heart.fill -->
+  <symbol id="ic-heart-fill" viewBox="0 0 24 24" fill="currentColor" stroke="none">
+    <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/>
+  </symbol>
+
+  <!-- calendar -->
+  <symbol id="ic-calendar" viewBox="0 0 24 24" fill="none"
+          stroke="currentColor" stroke-width="1.65"
+          stroke-linecap="round" stroke-linejoin="round">
+    <rect x="3" y="4" width="18" height="18" rx="2.5"/>
+    <line x1="3" y1="10" x2="21" y2="10"/>
+    <line x1="8" y1="2" x2="8" y2="6"/>
+    <line x1="16" y1="2" x2="16" y2="6"/>
+    <rect x="7" y="14" width="3" height="3" rx="0.5"/>
+    <rect x="11.5" y="14" width="3" height="3" rx="0.5"/>
+  </symbol>
+
+  <!-- folder -->
+  <symbol id="ic-folder" viewBox="0 0 24 24" fill="none"
+          stroke="currentColor" stroke-width="1.65"
+          stroke-linecap="round" stroke-linejoin="round">
+    <path d="M22 19a2.5 2.5 0 0 1-2.5 2.5h-15A2.5 2.5 0 0 1 2 19V7a2.5 2.5 0 0 1 2.5-2.5h4.69a1 1 0 0 1 .74.32l1.62 1.86a1 1 0 0 0 .74.32H19.5A2.5 2.5 0 0 1 22 9.5V19z"/>
+  </symbol>
+
+  <!-- folder.badge.plus -->
+  <symbol id="ic-folder-plus" viewBox="0 0 24 24" fill="none"
+          stroke="currentColor" stroke-width="1.65"
+          stroke-linecap="round" stroke-linejoin="round">
+    <path d="M22 19a2.5 2.5 0 0 1-2.5 2.5h-15A2.5 2.5 0 0 1 2 19V7a2.5 2.5 0 0 1 2.5-2.5h4.69a1 1 0 0 1 .74.32l1.62 1.86a1 1 0 0 0 .74.32H19.5A2.5 2.5 0 0 1 22 9.5V19z"/>
+    <line x1="12" y1="12" x2="12" y2="18"/>
+    <line x1="9" y1="15" x2="15" y2="15"/>
+  </symbol>
+
+  <!-- icloud.and.arrow.up -->
+  <symbol id="ic-cloud-up" viewBox="0 0 24 24" fill="none"
+          stroke="currentColor" stroke-width="1.65"
+          stroke-linecap="round" stroke-linejoin="round">
+    <polyline points="16 16 12 11.5 8 16"/>
+    <line x1="12" y1="11.5" x2="12" y2="21"/>
+    <path d="M20.39 18.39A5 5 0 0 0 18 9h-1.26A8 8 0 1 0 3 16.3"/>
+  </symbol>
+
+  <!-- square.grid.2x2 -->
+  <symbol id="ic-grid" viewBox="0 0 24 24" fill="none"
+          stroke="currentColor" stroke-width="1.65"
+          stroke-linecap="round" stroke-linejoin="round">
+    <rect x="3" y="3" width="7.5" height="7.5" rx="1.25"/>
+    <rect x="13.5" y="3" width="7.5" height="7.5" rx="1.25"/>
+    <rect x="3" y="13.5" width="7.5" height="7.5" rx="1.25"/>
+    <rect x="13.5" y="13.5" width="7.5" height="7.5" rx="1.25"/>
+  </symbol>
+
+  <!-- list.bullet -->
+  <symbol id="ic-list" viewBox="0 0 24 24" fill="none"
+          stroke="currentColor" stroke-width="1.65"
+          stroke-linecap="round" stroke-linejoin="round">
+    <circle cx="4.5" cy="6" r="1.5" fill="currentColor" stroke="none"/>
+    <circle cx="4.5" cy="12" r="1.5" fill="currentColor" stroke="none"/>
+    <circle cx="4.5" cy="18" r="1.5" fill="currentColor" stroke="none"/>
+    <line x1="9" y1="6" x2="21" y2="6"/>
+    <line x1="9" y1="12" x2="21" y2="12"/>
+    <line x1="9" y1="18" x2="21" y2="18"/>
+  </symbol>
+
+  <!-- plus -->
+  <symbol id="ic-plus" viewBox="0 0 24 24" fill="none"
+          stroke="currentColor" stroke-width="2.2"
+          stroke-linecap="round">
+    <line x1="12" y1="5" x2="12" y2="19"/>
+    <line x1="5" y1="12" x2="19" y2="12"/>
+  </symbol>
+
+  <!-- arrow.up -->
+  <symbol id="ic-arrow-up" viewBox="0 0 24 24" fill="none"
+          stroke="currentColor" stroke-width="1.65"
+          stroke-linecap="round" stroke-linejoin="round">
+    <line x1="12" y1="20" x2="12" y2="4"/>
+    <polyline points="5 11 12 4 19 11"/>
+  </symbol>
+
+  <!-- pencil -->
+  <symbol id="ic-pencil" viewBox="0 0 24 24" fill="none"
+          stroke="currentColor" stroke-width="1.65"
+          stroke-linecap="round" stroke-linejoin="round">
+    <path d="M12 20h9"/>
+    <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4 12.5-12.5z"/>
+  </symbol>
+
+  <!-- trash -->
+  <symbol id="ic-trash" viewBox="0 0 24 24" fill="none"
+          stroke="currentColor" stroke-width="1.65"
+          stroke-linecap="round" stroke-linejoin="round">
+    <polyline points="3 6 5 6 21 6"/>
+    <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/>
+    <line x1="10" y1="11" x2="10" y2="17"/>
+    <line x1="14" y1="11" x2="14" y2="17"/>
+  </symbol>
+
+  <!-- xmark -->
+  <symbol id="ic-xmark" viewBox="0 0 24 24" fill="none"
+          stroke="currentColor" stroke-width="2"
+          stroke-linecap="round">
+    <line x1="18" y1="6" x2="6" y2="18"/>
+    <line x1="6" y1="6" x2="18" y2="18"/>
+  </symbol>
+
+  <!-- chevron.left -->
+  <symbol id="ic-chevron-left" viewBox="0 0 24 24" fill="none"
+          stroke="currentColor" stroke-width="2"
+          stroke-linecap="round" stroke-linejoin="round">
+    <polyline points="15 18 9 12 15 6"/>
+  </symbol>
+
+  <!-- chevron.right -->
+  <symbol id="ic-chevron-right" viewBox="0 0 24 24" fill="none"
+          stroke="currentColor" stroke-width="2"
+          stroke-linecap="round" stroke-linejoin="round">
+    <polyline points="9 18 15 12 9 6"/>
+  </symbol>
+
+  <!-- rotate.right -->
+  <symbol id="ic-rotate-right" viewBox="0 0 24 24" fill="none"
+          stroke="currentColor" stroke-width="1.65"
+          stroke-linecap="round" stroke-linejoin="round">
+    <polyline points="23 4 23 10 17 10"/>
+    <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/>
+  </symbol>
+
+  <!-- rotate.left -->
+  <symbol id="ic-rotate-left" viewBox="0 0 24 24" fill="none"
+          stroke="currentColor" stroke-width="1.65"
+          stroke-linecap="round" stroke-linejoin="round">
+    <polyline points="1 4 1 10 7 10"/>
+    <path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/>
+  </symbol>
+
+  <!-- arrow.left.and.right (flip-h) -->
+  <symbol id="ic-flip-h" viewBox="0 0 24 24" fill="none"
+          stroke="currentColor" stroke-width="1.65"
+          stroke-linecap="round" stroke-linejoin="round">
+    <polyline points="7 17 3 12 7 7"/>
+    <polyline points="17 7 21 12 17 17"/>
+    <line x1="3" y1="12" x2="21" y2="12"/>
+  </symbol>
+
+  <!-- arrow.up.and.down (flip-v) -->
+  <symbol id="ic-flip-v" viewBox="0 0 24 24" fill="none"
+          stroke="currentColor" stroke-width="1.65"
+          stroke-linecap="round" stroke-linejoin="round">
+    <polyline points="7 7 12 3 17 7"/>
+    <polyline points="17 17 12 21 7 17"/>
+    <line x1="12" y1="3" x2="12" y2="21"/>
+  </symbol>
+
+  <!-- arrow.down.to.line (download/export) -->
+  <symbol id="ic-download" viewBox="0 0 24 24" fill="none"
+          stroke="currentColor" stroke-width="1.65"
+          stroke-linecap="round" stroke-linejoin="round">
+    <line x1="12" y1="4" x2="12" y2="18"/>
+    <polyline points="5 12 12 18 19 12"/>
+    <line x1="5" y1="21" x2="19" y2="21"/>
+  </symbol>
+
+  <!-- magnifyingglass + xmark (no results) -->
+  <symbol id="ic-search-x" viewBox="0 0 24 24" fill="none"
+          stroke="currentColor" stroke-width="1.65"
+          stroke-linecap="round" stroke-linejoin="round">
+    <circle cx="10.5" cy="10.5" r="6.5"/>
+    <line x1="15.5" y1="15.5" x2="21" y2="21"/>
+    <line x1="8.5" y1="13" x2="12.5" y2="8.5"/>
+    <line x1="12.5" y1="13" x2="8.5" y2="8.5"/>
+  </symbol>
+
+  <!-- slider.horizontal.3 (adjustments) -->
+  <symbol id="ic-sliders" viewBox="0 0 24 24" fill="none"
+          stroke="currentColor" stroke-width="1.65"
+          stroke-linecap="round" stroke-linejoin="round">
+    <line x1="4" y1="6" x2="20" y2="6"/>
+    <line x1="4" y1="12" x2="20" y2="12"/>
+    <line x1="4" y1="18" x2="20" y2="18"/>
+    <circle cx="9" cy="6" r="2.25" fill="white"/>
+    <circle cx="15" cy="12" r="2.25" fill="white"/>
+    <circle cx="10" cy="18" r="2.25" fill="white"/>
+  </symbol>
+
+  <!-- wand.and.stars (filters) -->
+  <symbol id="ic-wand" viewBox="0 0 24 24" fill="none"
+          stroke="currentColor" stroke-width="1.65"
+          stroke-linecap="round" stroke-linejoin="round">
+    <path d="M15 4V2M15 16v-2M8 9h2M20 9h2M17.8 6.2l1.4-1.4M10.2 6.2 8.8 4.8M17.8 11.8l1.4 1.4M10.2 11.8 8.8 13.2"/>
+    <path d="m3 21 9-9"/>
+    <path d="m12.5 7.5 4 4"/>
+  </symbol>
+
+  <!-- crop (transform) -->
+  <symbol id="ic-crop" viewBox="0 0 24 24" fill="none"
+          stroke="currentColor" stroke-width="1.65"
+          stroke-linecap="round" stroke-linejoin="round">
+    <path d="M6 2v14a2 2 0 0 0 2 2h14"/>
+    <path d="M18 22V8a2 2 0 0 0-2-2H2"/>
+  </symbol>
+
+</svg>
+<!-- end SVG sprite -->
+
+
+<div class="app-container">
+
+    <!-- ── Sidebar ── -->
+    <div class="sidebar">
+        <div class="sidebar-header">
+            <h1 class="app-title">Photos</h1>
+        </div>
+
+        <div class="sidebar-search">
+            <div class="search-wrapper">
+                <svg class="search-icon" aria-hidden="true"><use href="#ic-search"/></svg>
+                <input type="text" id="searchInput" placeholder="Search" oninput="filterPhotos()">
+            </div>
+        </div>
+
+        <nav class="sidebar-nav">
             <div class="nav-section">
-                <div class="nav-title">Library</div>
+                <div class="nav-section-title">Library</div>
                 <div class="nav-item active" data-view="all">
-                    <span>📷</span>
-                    <span>All Photos</span>
-                    <span class="count" id="allCount">0</span>
+                    <svg class="nav-icon" aria-hidden="true"><use href="#ic-photo"/></svg>
+                    <span class="nav-label">All Photos</span>
+                    <span class="nav-count" id="allCount">0</span>
                 </div>
                 <div class="nav-item" data-view="people">
-                    <span>👤</span>
-                    <span>People</span>
-                    <span class="count" id="peopleCount">0</span>
+                    <svg class="nav-icon" aria-hidden="true"><use href="#ic-people"/></svg>
+                    <span class="nav-label">People</span>
+                    <span class="nav-count" id="peopleCount">0</span>
                 </div>
                 <div class="nav-item" data-view="favorites">
-                    <span>⭐</span>
-                    <span>Favorites</span>
-                    <span class="count" id="favCount">0</span>
+                    <svg class="nav-icon" aria-hidden="true"><use href="#ic-heart"/></svg>
+                    <span class="nav-label">Favorites</span>
+                    <span class="nav-count" id="favCount">0</span>
                 </div>
                 <div class="nav-item" data-view="timeline">
-                    <span>📅</span>
-                    <span>Timeline</span>
-                    <span class="count" id="timelineCount">0</span>
+                    <svg class="nav-icon" aria-hidden="true"><use href="#ic-calendar"/></svg>
+                    <span class="nav-label">Timeline</span>
+                    <span class="nav-count" id="timelineCount">0</span>
                 </div>
             </div>
 
-            <div class="nav-section" style="flex: 1; overflow-y: auto;">
-                <div class="nav-title">Albums</div>
+            <div class="nav-section">
+                <div class="nav-section-title">Albums</div>
                 <div id="albumList"></div>
-                <button class="add-album-btn" onclick="createAlbum()">+ New Album</button>
+                <button class="add-album-btn" onclick="createAlbum()">
+                    <svg class="btn-icon-sm" aria-hidden="true"><use href="#ic-plus"/></svg>
+                    New Album
+                </button>
             </div>
+        </nav>
 
-            <div class="sidebar-footer">
-                <div class="storage-info">
-                    <div class="storage-text">
-                        <span id="photoCount">0</span> photos
-                    </div>
-                    <button type="button" class="btn-secondary sync-azure-btn" onclick="syncAzure()" title="Upload local library to Azure Blob when configured">☁️ Sync</button>
-                </div>
-            </div>
+        <div class="sidebar-footer">
+            <span><span id="photoCount">0</span> Photos</span>
+            <button class="sync-btn" onclick="syncAzure()">
+                <svg class="btn-icon-sm" aria-hidden="true"><use href="#ic-cloud-up"/></svg>
+                Sync
+            </button>
         </div>
+    </div>
 
-        <!-- Main Content -->
-        <div class="main-content">
-            <div class="toolbar">
-                <button class="btn-primary" onclick="importPhotos()">
-                    <span>⬆️</span>
-                    <span>Import Photos</span>
-                </button>
-                <button class="btn-secondary" onclick="toggleEditor()" id="editBtn" style="display:none;">
-                    <span>✏️</span>
-                    <span>Edit</span>
-                </button>
-                <button class="btn-secondary" onclick="deleteSelected()" id="deleteBtn" style="display:none;">
-                    <span>🗑️</span>
-                    <span>Delete</span>
-                </button>
-                <button class="btn-secondary" onclick="addToAlbum()" id="albumBtn" style="display:none;">
-                    <span>📁</span>
-                    <span>Add to Album</span>
-                </button>
-                <div class="search-box">
-                    <input type="text" id="searchInput" placeholder="Search photos..." oninput="filterPhotos()">
-                </div>
+    <!-- ── Main Content ── -->
+    <div class="main-content">
+
+        <!-- Top Bar -->
+        <div class="top-bar">
+            <div class="top-bar-left">
+                <h2 class="view-title" id="viewTitle">All Photos</h2>
+            </div>
+            <div class="top-bar-right">
                 <div class="view-toggle">
-                    <button class="view-btn active" onclick="setView('grid', event)">◫</button>
-                    <button class="view-btn" onclick="setView('list', event)">☰</button>
+                    <button class="view-btn active" onclick="setView('grid', event)" title="Grid view">
+                        <svg class="btn-icon" aria-hidden="true"><use href="#ic-grid"/></svg>
+                    </button>
+                    <button class="view-btn" onclick="setView('list', event)" title="List view">
+                        <svg class="btn-icon" aria-hidden="true"><use href="#ic-list"/></svg>
+                    </button>
                 </div>
-            </div>
-
-            <div class="gallery-container">
-                <div class="upload-zone active" onclick="importPhotos()">
-                    <div class="upload-icon">📸</div>
-                    <div class="upload-text">Click to import photos</div>
-                    <div class="upload-subtext">Supports JPG, PNG, GIF, WebP and more</div>
-                </div>
-                <div class="gallery-grid" id="gallery"></div>
-                <div class="empty-state" id="emptyState" style="display: none;">
-                    <div class="empty-icon">🖼️</div>
-                    <div class="empty-title">No photos found</div>
-                    <div class="empty-text">Try adjusting your filters or import new photos</div>
-                </div>
+                <button class="import-btn" onclick="importPhotos()" title="Import Photos">
+                    <svg class="btn-icon-plus" aria-hidden="true"><use href="#ic-plus"/></svg>
+                </button>
             </div>
         </div>
 
-        <!-- Editor Panel -->
-        <div class="editor-panel" id="editorPanel">
-            <div class="editor-header">
-                <div class="editor-title">Edit Photo</div>
-                <button class="close-btn" onclick="toggleEditor()">✕</button>
+        <!-- Gallery -->
+        <div class="gallery-container">
+            <div class="upload-zone" onclick="importPhotos()">
+                <div class="upload-icon-wrap">
+                    <svg class="upload-svg" aria-hidden="true"><use href="#ic-arrow-up"/></svg>
+                </div>
+                <div class="upload-text">Import Photos</div>
+                <div class="upload-subtext">Click to choose photos from your computer</div>
             </div>
-            
-            <div class="editor-content">
-                <div class="editor-section">
-                    <h3>Filters</h3>
-                    <div class="filter-grid">
-                        <button class="filter-btn active" onclick="applyFilter('none', event)">Original</button>
-                        <button class="filter-btn" onclick="applyFilter('grayscale', event)">B&W</button>
-                        <button class="filter-btn" onclick="applyFilter('sepia', event)">Sepia</button>
-                        <button class="filter-btn" onclick="applyFilter('vintage', event)">Vintage</button>
-                        <button class="filter-btn" onclick="applyFilter('warm', event)">Warm</button>
-                        <button class="filter-btn" onclick="applyFilter('cool', event)">Cool</button>
-                        <button class="filter-btn" onclick="applyFilter('vivid', event)">Vivid</button>
-                        <button class="filter-btn" onclick="applyFilter('dramatic', event)">Dramatic</button>
-                    </div>
+            <div class="gallery-grid" id="gallery"></div>
+            <div class="empty-state" id="emptyState">
+                <svg class="empty-icon-svg" aria-hidden="true"><use href="#ic-search-x"/></svg>
+                <div class="empty-title">No Results</div>
+                <div class="empty-text">No photos match your search</div>
+            </div>
+        </div>
+
+        <!-- Bottom Contextual Toolbar -->
+        <div class="bottom-toolbar" id="bottomToolbar">
+            <div class="bottom-toolbar-inner">
+                <span class="selection-count" id="selectionCount">0 selected</span>
+                <div class="toolbar-divider"></div>
+                <div class="toolbar-actions">
+                    <button class="toolbar-btn" id="editBtn" onclick="toggleEditor()">
+                        <svg class="toolbar-icon" aria-hidden="true"><use href="#ic-pencil"/></svg>
+                        <span>Edit</span>
+                    </button>
+                    <button class="toolbar-btn" id="albumBtn" onclick="addToAlbum()">
+                        <svg class="toolbar-icon" aria-hidden="true"><use href="#ic-folder-plus"/></svg>
+                        <span>Album</span>
+                    </button>
+                    <button class="toolbar-btn danger" id="deleteBtn" onclick="deleteSelected()">
+                        <svg class="toolbar-icon" aria-hidden="true"><use href="#ic-trash"/></svg>
+                        <span>Delete</span>
+                    </button>
                 </div>
-
-                <div class="editor-section">
-                    <h3>Adjustments</h3>
-                    
-                    <div class="slider-control">
-                        <div class="slider-label">
-                            <span>Brightness</span>
-                            <span id="brightnessValue">100%</span>
-                        </div>
-                        <input type="range" class="slider" min="50" max="150" value="100" 
-                               oninput="adjustBrightness(this.value)">
-                    </div>
-
-                    <div class="slider-control">
-                        <div class="slider-label">
-                            <span>Contrast</span>
-                            <span id="contrastValue">100%</span>
-                        </div>
-                        <input type="range" class="slider" min="50" max="150" value="100" 
-                               oninput="adjustContrast(this.value)">
-                    </div>
-
-                    <div class="slider-control">
-                        <div class="slider-label">
-                            <span>Saturation</span>
-                            <span id="saturationValue">100%</span>
-                        </div>
-                        <input type="range" class="slider" min="0" max="200" value="100" 
-                               oninput="adjustSaturation(this.value)">
-                    </div>
-
-                    <div class="slider-control">
-                        <div class="slider-label">
-                            <span>Blur</span>
-                            <span id="blurValue">0px</span>
-                        </div>
-                        <input type="range" class="slider" min="0" max="10" value="0" 
-                               oninput="adjustBlur(this.value)">
-                    </div>
-                </div>
-
-                <div class="editor-section">
-                    <h3>Transform</h3>
-                    <div class="transform-buttons">
-                        <button class="btn-secondary" onclick="rotateLeft()">↶ Rotate Left</button>
-                        <button class="btn-secondary" onclick="rotateRight()">↷ Rotate Right</button>
-                        <button class="btn-secondary" onclick="flipHorizontal()">⟷ Flip H</button>
-                        <button class="btn-secondary" onclick="flipVertical()">⟱ Flip V</button>
-                    </div>
-                </div>
-
-                <div class="editor-section">
-                    <button class="btn-primary" style="width: 100%; margin-bottom: 10px;" onclick="saveEdits()">Save Changes</button>
-                    <button class="btn-secondary" style="width: 100%; margin-bottom: 10px;" onclick="resetEdits()">Reset</button>
-                    <button class="btn-secondary" style="width: 100%;" onclick="exportPhoto()">Export Photo</button>
-                </div>
+                <div class="toolbar-divider"></div>
+                <button class="toolbar-deselect" onclick="clearSelection()">Done</button>
             </div>
         </div>
     </div>
 
-    <!-- Modal -->
-    <div class="modal" id="photoModal" onclick="closeModal(event)">
-        <button class="modal-close" onclick="closeModal(event)">×</button>
-        <div class="modal-content">
-            <img id="modalImage" class="modal-image">
-            <div class="modal-toolbar">
-                <button onclick="previousPhoto()">◀</button>
-                <button onclick="rotatePhotoModal()">↻</button>
-                <button onclick="toggleFavorite()" id="favBtn">⭐</button>
-                <button onclick="exportCurrentPhoto()">⬇</button>
-                <button onclick="nextPhoto()">▶</button>
+    <!-- ── Editor Panel ── -->
+    <div class="editor-panel" id="editorPanel">
+        <div class="editor-header">
+            <div class="editor-title">Edit Photo</div>
+            <button class="close-btn" onclick="toggleEditor()" aria-label="Close editor">
+                <svg class="close-icon" aria-hidden="true"><use href="#ic-xmark"/></svg>
+            </button>
+        </div>
+        <div class="editor-content">
+
+            <div class="editor-section">
+                <h3 class="editor-section-title">
+                    <svg class="section-icon" aria-hidden="true"><use href="#ic-wand"/></svg>
+                    Filters
+                </h3>
+                <div class="filter-grid">
+                    <button class="filter-btn active" onclick="applyFilter('none', event)">Original</button>
+                    <button class="filter-btn" onclick="applyFilter('grayscale', event)">B&amp;W</button>
+                    <button class="filter-btn" onclick="applyFilter('sepia', event)">Sepia</button>
+                    <button class="filter-btn" onclick="applyFilter('vintage', event)">Vintage</button>
+                    <button class="filter-btn" onclick="applyFilter('warm', event)">Warm</button>
+                    <button class="filter-btn" onclick="applyFilter('cool', event)">Cool</button>
+                    <button class="filter-btn" onclick="applyFilter('vivid', event)">Vivid</button>
+                    <button class="filter-btn" onclick="applyFilter('dramatic', event)">Dramatic</button>
+                </div>
+            </div>
+
+            <div class="editor-section">
+                <h3 class="editor-section-title">
+                    <svg class="section-icon" aria-hidden="true"><use href="#ic-sliders"/></svg>
+                    Adjustments
+                </h3>
+                <div class="slider-control">
+                    <div class="slider-label"><span>Brightness</span><span id="brightnessValue">100%</span></div>
+                    <input type="range" class="slider" min="50" max="150" value="100" oninput="adjustBrightness(this.value)">
+                </div>
+                <div class="slider-control">
+                    <div class="slider-label"><span>Contrast</span><span id="contrastValue">100%</span></div>
+                    <input type="range" class="slider" min="50" max="150" value="100" oninput="adjustContrast(this.value)">
+                </div>
+                <div class="slider-control">
+                    <div class="slider-label"><span>Saturation</span><span id="saturationValue">100%</span></div>
+                    <input type="range" class="slider" min="0" max="200" value="100" oninput="adjustSaturation(this.value)">
+                </div>
+                <div class="slider-control">
+                    <div class="slider-label"><span>Blur</span><span id="blurValue">0px</span></div>
+                    <input type="range" class="slider" min="0" max="10" value="0" oninput="adjustBlur(this.value)">
+                </div>
+            </div>
+
+            <div class="editor-section">
+                <h3 class="editor-section-title">
+                    <svg class="section-icon" aria-hidden="true"><use href="#ic-crop"/></svg>
+                    Transform
+                </h3>
+                <div class="transform-buttons">
+                    <button class="transform-btn" onclick="rotateLeft()">
+                        <svg class="transform-icon" aria-hidden="true"><use href="#ic-rotate-left"/></svg>
+                        Rotate Left
+                    </button>
+                    <button class="transform-btn" onclick="rotateRight()">
+                        <svg class="transform-icon" aria-hidden="true"><use href="#ic-rotate-right"/></svg>
+                        Rotate Right
+                    </button>
+                    <button class="transform-btn" onclick="flipHorizontal()">
+                        <svg class="transform-icon" aria-hidden="true"><use href="#ic-flip-h"/></svg>
+                        Flip H
+                    </button>
+                    <button class="transform-btn" onclick="flipVertical()">
+                        <svg class="transform-icon" aria-hidden="true"><use href="#ic-flip-v"/></svg>
+                        Flip V
+                    </button>
+                </div>
+            </div>
+
+            <div class="editor-section editor-footer-btns">
+                <button class="btn-primary" onclick="saveEdits()">Save Changes</button>
+                <button class="btn-secondary-editor" onclick="resetEdits()">Reset</button>
+                <button class="btn-secondary-editor" onclick="exportPhoto()">
+                    <svg class="btn-icon-sm" aria-hidden="true"><use href="#ic-download"/></svg>
+                    Export
+                </button>
             </div>
         </div>
     </div>
 
-    <!-- Album Selection Modal -->
-    <div class="modal" id="albumModal" onclick="closeAlbumModal(event)">
-        <div class="modal-dialog" onclick="event.stopPropagation()">
-            <div class="modal-header">
-                <h3>Add to Album</h3>
-                <button class="close-btn" onclick="closeAlbumModal()">✕</button>
-            </div>
-            <div class="modal-body">
-                <div id="albumSelectList"></div>
-            </div>
+</div><!-- /.app-container -->
+
+<!-- ── Photo Viewer Modal ── -->
+<div class="modal" id="photoModal" onclick="closeModal(event)">
+    <button class="modal-close" onclick="closeModal(event)" aria-label="Close">
+        <svg class="close-icon" aria-hidden="true"><use href="#ic-xmark"/></svg>
+    </button>
+    <div class="modal-content">
+        <img id="modalImage" class="modal-image" alt="">
+        <div class="modal-toolbar">
+            <button onclick="previousPhoto()" title="Previous" aria-label="Previous">
+                <svg class="modal-nav-icon" aria-hidden="true"><use href="#ic-chevron-left"/></svg>
+            </button>
+            <button onclick="rotatePhotoModal()" title="Rotate" aria-label="Rotate">
+                <svg class="modal-tool-icon" aria-hidden="true"><use href="#ic-rotate-right"/></svg>
+            </button>
+            <button onclick="toggleFavorite()" id="favBtn" title="Favorite" aria-label="Favorite">
+                <svg class="modal-fav-icon" aria-hidden="true" id="favIcon"><use href="#ic-heart"/></svg>
+            </button>
+            <button onclick="exportCurrentPhoto()" title="Export" aria-label="Export">
+                <svg class="modal-tool-icon" aria-hidden="true"><use href="#ic-download"/></svg>
+            </button>
+            <button onclick="nextPhoto()" title="Next" aria-label="Next">
+                <svg class="modal-nav-icon" aria-hidden="true"><use href="#ic-chevron-right"/></svg>
+            </button>
         </div>
     </div>
+</div>
 
-    <script src="app.js"></script>
+<!-- ── Album Selection Modal ── -->
+<div class="modal" id="albumModal" onclick="closeAlbumModal(event)">
+    <div class="modal-dialog" onclick="event.stopPropagation()">
+        <div class="modal-header">
+            <h3>Add to Album</h3>
+            <button class="close-btn" onclick="closeAlbumModal()" aria-label="Close">
+                <svg class="close-icon" aria-hidden="true"><use href="#ic-xmark"/></svg>
+            </button>
+        </div>
+        <div class="modal-body">
+            <div id="albumSelectList"></div>
+        </div>
+    </div>
+</div>
+
+<script src="app.js"></script>
 </body>
 </html>
