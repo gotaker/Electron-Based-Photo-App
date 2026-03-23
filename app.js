@@ -6,6 +6,7 @@ let selectedPhotos = new Set();
 let currentPhotoIndex = 0;
 let currentEditingPhoto = null;
 let searchQuery = '';
+let galleryVisibleCount = 48;
 
 // Editor state
 let currentFilter = 'none';
@@ -17,6 +18,14 @@ let rotation = 0;
 let flipH = false;
 let flipV = false;
 
+// View title map
+const VIEW_TITLES = {
+    all: 'All Photos',
+    people: 'People',
+    favorites: 'Favorites',
+    timeline: 'Timeline'
+};
+
 // Initialize app
 async function initApp() {
     await loadPhotos();
@@ -24,27 +33,13 @@ async function initApp() {
     renderGallery();
     renderAlbums();
     updateCounts();
-    updateStorageInfo();
 }
 
 // Load data from Electron store
 async function loadPhotos() {
-    console.log('Loading photos from storage...');
     const result = await window.electronAPI.getPhotos();
-    console.log('Load photos result:', result);
-    
     if (result.success) {
         photos = result.photos;
-        console.log(`Loaded ${photos.length} photos`);
-        
-        // Debug: Check if photos have src
-        photos.forEach((photo, index) => {
-            if (!photo.src) {
-                console.warn(`Photo ${index} (${photo.name}) has no src!`, photo);
-            }
-        });
-    } else {
-        console.error('Failed to load photos:', result.error);
     }
 }
 
@@ -53,7 +48,6 @@ async function loadAlbums() {
     if (result.success) {
         albums = result.albums;
     } else {
-        // Create default albums if none exist
         const defaultAlbums = [
             { id: Date.now() + 1, name: 'Favorites', photos: [] },
             { id: Date.now() + 2, name: 'Family', photos: [] }
@@ -67,58 +61,64 @@ async function loadAlbums() {
 
 // File handling
 async function importPhotos() {
-    console.log('Opening file dialog...');
     const result = await window.electronAPI.openFileDialog();
-    console.log('File dialog result:', result);
-    
+
     if (result.success && result.files.length > 0) {
-        console.log(`Importing ${result.files.length} files...`);
-        
         for (const file of result.files) {
-            console.log('File object from dialog:', file);
-            console.log('File has these properties:', Object.keys(file));
-            
-            // Use the EXACT data from the file object
-            const photo = {
+            const displayDate = file.displayDate || new Date().toLocaleDateString();
+            const metadata = {
                 id: file.id,
                 name: file.name,
                 storagePath: file.storagePath,
                 relativePath: file.relativePath,
                 thumbnailPath: file.thumbnailPath,
                 originalPath: file.originalPath,
-                date: new Date().toLocaleDateString(),
-                dateAdded: new Date().toISOString(),
+                date: displayDate,
+                dateAdded: file.dateAdded || new Date().toISOString(),
+                captureDateISO: file.captureDateISO || null,
                 favorite: false,
-                faces: Math.floor(Math.random() * 4),
+                faces: file.faces != null ? file.faces : Math.floor(Math.random() * 4),
                 album: null,
                 tags: [],
-                fileSize: file.fileSize
+                fileSize: file.fileSize || 0
             };
-            
-            console.log('Photo object to save:', photo);
-            console.log('Photo has these properties:', Object.keys(photo));
-            
-            const saveResult = await window.electronAPI.savePhoto(photo);
-            console.log('Save result:', saveResult);
-            
+
+            const saveResult = await window.electronAPI.savePhoto(metadata);
             if (!saveResult.success) {
-                console.error('Failed to save photo:', saveResult.error);
-                alert('Failed to save photo: ' + saveResult.error);
+                console.error('savePhoto failed:', saveResult.error);
             }
         }
-        
-        // Reload all photos from storage
-        console.log('Reloading photos from storage...');
+
         await loadPhotos();
-        
+        galleryVisibleCount = 48;
         renderGallery();
         updateCounts();
-        updateStorageInfo();
-        
-        console.log('Import complete!');
-    } else {
-        console.log('No files selected or import cancelled');
     }
+}
+
+function photoCardHtml(photo) {
+    const isSelected = selectedPhotos.has(photo.id);
+    return `
+        <div class="photo-card ${isSelected ? 'is-selected' : ''}" data-photo-id="${escapeAttr(photo.id)}" onclick="openPhoto('${escapeJsString(photo.id)}')">
+            <img src="${photo.src}" alt="${escapeAttr(photo.name)}">
+            <div class="photo-select ${isSelected ? 'selected' : ''}"
+                 onclick="event.stopPropagation(); toggleSelect('${escapeJsString(photo.id)}')"></div>
+            ${photo.faces > 0 ? `<div class="face-badge">👤 ${photo.faces} ${photo.faces === 1 ? 'person' : 'people'}</div>` : ''}
+            ${photo.favorite ? '<div class="fav-badge">♥</div>' : ''}
+            <div class="photo-info">
+                <div class="photo-name">${escapeHtml(photo.name)}</div>
+                <div class="photo-date">${escapeHtml(photo.date || '')}</div>
+            </div>
+        </div>
+    `;
+}
+
+function sortPhotosForTimeline(list) {
+    return [...list].sort((a, b) => {
+        const d1 = new Date(a.captureDateISO || a.dateAdded || 0).getTime();
+        const d2 = new Date(b.captureDateISO || b.dateAdded || 0).getTime();
+        return d2 - d1;
+    });
 }
 
 // Render functions
@@ -128,11 +128,9 @@ function renderGallery() {
     const emptyState = document.getElementById('emptyState');
 
     let filteredPhotos = getFilteredPhotos();
-    
-    console.log(`Rendering gallery with ${photos.length} total photos, ${filteredPhotos.length} filtered`);
 
     if (photos.length === 0) {
-        uploadZone.style.display = 'block';
+        uploadZone.style.display = 'flex';
         gallery.style.display = 'none';
         emptyState.style.display = 'none';
         return;
@@ -142,41 +140,84 @@ function renderGallery() {
 
     if (filteredPhotos.length === 0) {
         gallery.style.display = 'none';
-        emptyState.style.display = 'block';
+        emptyState.style.display = 'flex';
         return;
     }
 
     gallery.style.display = 'grid';
     emptyState.style.display = 'none';
 
-    gallery.innerHTML = filteredPhotos.map((photo) => {
-        // Debug each photo
-        if (!photo.src) {
-            console.error('Photo missing src:', photo);
+    let listForPaging = filteredPhotos;
+    if (currentView === 'timeline') {
+        listForPaging = sortPhotosForTimeline(filteredPhotos);
+    }
+
+    const visible = listForPaging.slice(0, galleryVisibleCount);
+
+    let html = '';
+    if (currentView === 'timeline') {
+        let lastMonth = '';
+        for (const photo of visible) {
+            const raw = photo.captureDateISO || photo.dateAdded;
+            const d = new Date(raw || Date.now());
+            const month = d.toLocaleString('default', { month: 'long', year: 'numeric' });
+            if (month !== lastMonth) {
+                html += `<h3 class="timeline-heading">${escapeHtml(month)}</h3>`;
+                lastMonth = month;
+            }
+            html += photoCardHtml(photo);
         }
-        
-        return `
-        <div class="photo-card" onclick="openPhoto('${photo.id}')">
-            <img src="${photo.src || 'data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMjAwIiBoZWlnaHQ9IjIwMCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48cmVjdCB3aWR0aD0iMjAwIiBoZWlnaHQ9IjIwMCIgZmlsbD0iI2NjYyIvPjx0ZXh0IHg9IjUwJSIgeT0iNTAlIiBmb250LXNpemU9IjE2IiBmaWxsPSIjNjY2IiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBkeT0iLjNlbSI+Tm8gSW1hZ2U8L3RleHQ+PC9zdmc+'}" alt="${photo.name}" onerror="console.error('Image failed to load:', '${photo.name}')">
-            <div class="photo-select ${selectedPhotos.has(photo.id) ? 'selected' : ''}" 
-                 onclick="event.stopPropagation(); toggleSelect('${photo.id}')"></div>
-            ${photo.faces > 0 ? `<div class="face-badge">👤 ${photo.faces} ${photo.faces === 1 ? 'person' : 'people'}</div>` : ''}
-            ${photo.favorite ? '<div class="face-badge" style="left: auto; right: 10px; background: #f39c12;">⭐</div>' : ''}
-            <div class="photo-info">
-                <div class="photo-name">${photo.name}</div>
-                <div class="photo-date">${photo.date}</div>
-            </div>
-        </div>
-    `;
-    }).join('');
+    } else {
+        html = visible.map((photo) => photoCardHtml(photo)).join('');
+    }
+
+    gallery.innerHTML = html;
+
+    if (galleryVisibleCount < listForPaging.length) {
+        gallery.insertAdjacentHTML('beforeend', `<div id="galleryLoadMore" class="gallery-load-more">Loading more…</div>`);
+        observeGallerySentinel(listForPaging.length);
+    }
 
     updateToolbar();
+}
+
+function escapeHtml(s) {
+    return String(s)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
+}
+
+function escapeAttr(s) {
+    return escapeHtml(s);
+}
+
+function escapeJsString(s) {
+    return String(s).replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+}
+
+let galleryObserver = null;
+
+function observeGallerySentinel(totalFiltered) {
+    const sentinel = document.getElementById('galleryLoadMore');
+    if (!sentinel) return;
+    if (galleryObserver) galleryObserver.disconnect();
+    galleryObserver = new IntersectionObserver(
+        (entries) => {
+            if (!entries[0].isIntersecting) return;
+            if (galleryVisibleCount >= totalFiltered) return;
+            galleryVisibleCount = Math.min(galleryVisibleCount + 48, totalFiltered);
+            renderGallery();
+        },
+        { root: null, rootMargin: '400px' }
+    );
+    galleryObserver.observe(sentinel);
 }
 
 function getFilteredPhotos() {
     let filtered = photos;
 
-    // Filter by view
     if (currentView === 'favorites') {
         filtered = filtered.filter(p => p.favorite);
     } else if (currentView === 'people') {
@@ -185,12 +226,12 @@ function getFilteredPhotos() {
         filtered = filtered.filter(p => p.album === currentView);
     }
 
-    // Filter by search
     if (searchQuery) {
         const query = searchQuery.toLowerCase();
-        filtered = filtered.filter(p => 
+        filtered = filtered.filter(p =>
             p.name.toLowerCase().includes(query) ||
-            p.date.toLowerCase().includes(query) ||
+            (p.date && p.date.toLowerCase().includes(query)) ||
+            (p.captureDateISO && p.captureDateISO.toLowerCase().includes(query)) ||
             (p.tags && p.tags.some(tag => tag.toLowerCase().includes(query)))
         );
     }
@@ -200,6 +241,7 @@ function getFilteredPhotos() {
 
 function filterPhotos() {
     searchQuery = document.getElementById('searchInput').value;
+    galleryVisibleCount = 48;
     renderGallery();
 }
 
@@ -209,7 +251,8 @@ function renderAlbums() {
         const count = photos.filter(p => p.album === album.id).length;
         return `
             <div class="album-item" onclick="switchView(${album.id})">
-                <span>📁 ${album.name}</span>
+                <span class="nav-icon">📁</span>
+                <span class="nav-label">${escapeHtml(album.name)}</span>
                 <span class="album-count">${count}</span>
                 <button class="album-delete" onclick="event.stopPropagation(); deleteAlbum(${album.id})">×</button>
             </div>
@@ -225,7 +268,6 @@ async function createAlbum() {
             name: name.trim(),
             photos: []
         };
-        
         const result = await window.electronAPI.saveAlbum(album);
         if (result.success) {
             albums.push(album);
@@ -239,7 +281,6 @@ async function deleteAlbum(albumId) {
         const result = await window.electronAPI.deleteAlbum(albumId);
         if (result.success) {
             albums = albums.filter(a => a.id !== albumId);
-            // Remove album from photos
             for (const photo of photos.filter(p => p.album === albumId)) {
                 await window.electronAPI.updatePhoto(photo.id, { album: null });
                 photo.album = null;
@@ -252,14 +293,27 @@ async function deleteAlbum(albumId) {
     }
 }
 
+function updateViewTitle(view) {
+    const titleEl = document.getElementById('viewTitle');
+    if (!titleEl) return;
+    if (typeof view === 'string') {
+        titleEl.textContent = VIEW_TITLES[view] || 'Photos';
+    } else {
+        const album = albums.find(a => a.id === view);
+        titleEl.textContent = album ? album.name : 'Album';
+    }
+}
+
 function switchView(view) {
     currentView = view;
+    galleryVisibleCount = 48;
     document.querySelectorAll('.nav-item').forEach(item => {
         item.classList.remove('active');
     });
     if (typeof view === 'string') {
         document.querySelector(`[data-view="${view}"]`)?.classList.add('active');
     }
+    updateViewTitle(view);
     renderGallery();
 }
 
@@ -269,6 +323,8 @@ document.querySelectorAll('.nav-item').forEach(item => {
         document.querySelectorAll('.nav-item').forEach(i => i.classList.remove('active'));
         item.classList.add('active');
         currentView = item.dataset.view;
+        galleryVisibleCount = 48;
+        updateViewTitle(currentView);
         renderGallery();
     });
 });
@@ -283,41 +339,39 @@ function toggleSelect(photoId) {
     renderGallery();
 }
 
+function clearSelection() {
+    selectedPhotos.clear();
+    renderGallery();
+    updateToolbar();
+}
+
 function updateToolbar() {
+    const bottomToolbar = document.getElementById('bottomToolbar');
     const editBtn = document.getElementById('editBtn');
-    const deleteBtn = document.getElementById('deleteBtn');
-    const albumBtn = document.getElementById('albumBtn');
-    
+    const selectionCount = document.getElementById('selectionCount');
+
     if (selectedPhotos.size > 0) {
-        editBtn.style.display = selectedPhotos.size === 1 ? 'flex' : 'none';
-        deleteBtn.style.display = 'flex';
-        albumBtn.style.display = 'flex';
+        if (bottomToolbar) bottomToolbar.classList.add('visible');
+        if (selectionCount) {
+            selectionCount.textContent = `${selectedPhotos.size} selected`;
+        }
+        if (editBtn) {
+            editBtn.style.display = selectedPhotos.size === 1 ? 'flex' : 'none';
+        }
     } else {
-        editBtn.style.display = 'none';
-        deleteBtn.style.display = 'none';
-        albumBtn.style.display = 'none';
+        if (bottomToolbar) bottomToolbar.classList.remove('visible');
     }
 }
 
 async function deleteSelected() {
     if (confirm(`Delete ${selectedPhotos.size} photo(s)?`)) {
         const photoIds = Array.from(selectedPhotos);
-        console.log('Deleting photos:', photoIds);
-        
         const result = await window.electronAPI.deletePhotos(photoIds);
-        console.log('Delete result:', result);
-        
         if (result.success) {
+            photos = photos.filter(p => !selectedPhotos.has(p.id));
             selectedPhotos.clear();
-            // Reload photos from storage to get fresh data
-            await loadPhotos();
             renderGallery();
             updateCounts();
-            updateStorageInfo();
-            console.log('Photos deleted successfully');
-        } else {
-            console.error('Failed to delete photos:', result.error);
-            alert('Failed to delete photos: ' + result.error);
         }
     }
 }
@@ -326,13 +380,12 @@ async function deleteSelected() {
 function addToAlbum() {
     const modal = document.getElementById('albumModal');
     const albumSelectList = document.getElementById('albumSelectList');
-    
     albumSelectList.innerHTML = albums.map(album => `
         <div class="album-item" onclick="assignToAlbum(${album.id})">
-            <span>📁 ${album.name}</span>
+            <span class="nav-icon">📁</span>
+            <span class="nav-label">${escapeHtml(album.name)}</span>
         </div>
     `).join('');
-    
     modal.classList.add('active');
 }
 
@@ -344,7 +397,6 @@ async function assignToAlbum(albumId) {
             photo.album = albumId;
         }
     }
-    
     selectedPhotos.clear();
     closeAlbumModal();
     renderGallery();
@@ -357,24 +409,26 @@ function closeAlbumModal(event) {
     }
 }
 
-// Modal
+// Modal / Photo viewer
 async function openPhoto(photoId) {
     const photo = photos.find(p => p.id === photoId);
     if (!photo) return;
-    
+
     currentPhotoIndex = photos.indexOf(photo);
-    const modalImage = document.getElementById('modalImage');
-    
-    // Show thumbnail first for instant display
-    modalImage.src = photo.src;
-    document.getElementById('photoModal').classList.add('active');
-    
-    // Load full resolution in background
-    const fullPhotoResult = await window.electronAPI.getFullPhoto(photoId);
-    if (fullPhotoResult.success) {
-        modalImage.src = fullPhotoResult.photo.src;
+    const modal = document.getElementById('photoModal');
+    const img = document.getElementById('modalImage');
+    img.style.transform = '';
+    modal.classList.add('active');
+    img.alt = photo.name;
+    img.removeAttribute('src');
+    img.src = '';
+
+    const full = await window.electronAPI.getFullPhoto(photoId);
+    if (full.success && full.photo && full.photo.src) {
+        img.src = full.photo.src;
+    } else {
+        img.src = photo.src;
     }
-    
     updateFavoriteButton();
 }
 
@@ -423,28 +477,25 @@ async function toggleFavorite() {
 function updateFavoriteButton() {
     const photo = photos[currentPhotoIndex];
     const favBtn = document.getElementById('favBtn');
-    favBtn.style.opacity = photo.favorite ? '1' : '0.5';
+    if (favBtn) favBtn.style.color = photo.favorite ? '#FF2D55' : 'white';
 }
 
 async function exportCurrentPhoto() {
     const photo = photos[currentPhotoIndex];
     const result = await window.electronAPI.exportPhoto(photo.id, photo.name);
-    if (result.success) {
-        alert('Photo exported successfully!');
-    }
+    if (result.success) alert('Photo exported successfully!');
 }
 
 // Editor
 function toggleEditor() {
     const panel = document.getElementById('editorPanel');
     const isActive = panel.classList.contains('active');
-    
+
     if (!isActive && selectedPhotos.size === 1) {
         const photoId = Array.from(selectedPhotos)[0];
         currentEditingPhoto = photos.find(p => p.id === photoId);
         resetEditorControls();
     }
-    
     panel.classList.toggle('active');
 }
 
@@ -457,22 +508,23 @@ function resetEditorControls() {
     rotation = 0;
     flipH = false;
     flipV = false;
-    
+
     document.querySelectorAll('.filter-btn').forEach(btn => btn.classList.remove('active'));
     document.querySelector('.filter-btn').classList.add('active');
-    
+
     document.querySelector('[oninput="adjustBrightness(this.value)"]').value = 100;
     document.querySelector('[oninput="adjustContrast(this.value)"]').value = 100;
     document.querySelector('[oninput="adjustSaturation(this.value)"]').value = 100;
     document.querySelector('[oninput="adjustBlur(this.value)"]').value = 0;
-    
+
     updatePreview();
 }
 
-function applyFilter(filter) {
+function applyFilter(filter, ev) {
     currentFilter = filter;
     document.querySelectorAll('.filter-btn').forEach(btn => btn.classList.remove('active'));
-    event.target.classList.add('active');
+    const t = (ev && ev.target) || (typeof event !== 'undefined' ? event.target : null);
+    if (t && t.classList) t.classList.add('active');
     updatePreview();
 }
 
@@ -500,99 +552,69 @@ function adjustBlur(value) {
     updatePreview();
 }
 
-function rotateLeft() {
-    rotation = (rotation - 90) % 360;
-    updatePreview();
-}
-
-function rotateRight() {
-    rotation = (rotation + 90) % 360;
-    updatePreview();
-}
-
-function flipHorizontal() {
-    flipH = !flipH;
-    updatePreview();
-}
-
-function flipVertical() {
-    flipV = !flipV;
-    updatePreview();
-}
+function rotateLeft() { rotation = (rotation - 90) % 360; updatePreview(); }
+function rotateRight() { rotation = (rotation + 90) % 360; updatePreview(); }
+function flipHorizontal() { flipH = !flipH; updatePreview(); }
+function flipVertical() { flipV = !flipV; updatePreview(); }
 
 function updatePreview() {
     if (!currentEditingPhoto) return;
-    
-    const photoCard = document.querySelector(`[onclick*="${currentEditingPhoto.id}"] img`);
+    const photoCard = document.querySelector(`.photo-card[data-photo-id="${currentEditingPhoto.id}"] img`);
     if (!photoCard) return;
 
     let filterCSS = '';
-    
     switch(currentFilter) {
-        case 'grayscale':
-            filterCSS = 'grayscale(100%)';
-            break;
-        case 'sepia':
-            filterCSS = 'sepia(100%)';
-            break;
-        case 'vintage':
-            filterCSS = 'sepia(50%) contrast(110%)';
-            break;
-        case 'warm':
-            filterCSS = 'sepia(20%) saturate(120%)';
-            break;
-        case 'cool':
-            filterCSS = 'hue-rotate(180deg) saturate(80%)';
-            break;
-        case 'vivid':
-            filterCSS = 'saturate(150%) contrast(110%)';
-            break;
-        case 'dramatic':
-            filterCSS = 'contrast(130%) brightness(90%)';
-            break;
+        case 'grayscale': filterCSS = 'grayscale(100%)'; break;
+        case 'sepia': filterCSS = 'sepia(100%)'; break;
+        case 'vintage': filterCSS = 'sepia(50%) contrast(110%)'; break;
+        case 'warm': filterCSS = 'sepia(20%) saturate(120%)'; break;
+        case 'cool': filterCSS = 'hue-rotate(180deg) saturate(80%)'; break;
+        case 'vivid': filterCSS = 'saturate(150%) contrast(110%)'; break;
+        case 'dramatic': filterCSS = 'contrast(130%) brightness(90%)'; break;
     }
 
     const fullFilter = `${filterCSS} brightness(${brightness}%) contrast(${contrast}%) saturate(${saturation}%) blur(${blur}px)`;
     const transform = `rotate(${rotation}deg) scaleX(${flipH ? -1 : 1}) scaleY(${flipV ? -1 : 1})`;
-    
     photoCard.style.filter = fullFilter;
     photoCard.style.transform = transform;
 }
 
 async function saveEdits() {
     if (!currentEditingPhoto) return;
-    
-    // In a production app, you would apply the edits to the actual image
-    // For now, we'll just show a confirmation
-    alert('Edits saved! In a full version, this would permanently apply changes to the image.');
-    
-    // Reset the preview
-    const photoCard = document.querySelector(`[onclick*="${currentEditingPhoto.id}"] img`);
-    if (photoCard) {
-        photoCard.style.filter = '';
-        photoCard.style.transform = '';
-    }
-    
+    const payload = {
+        filter: currentFilter,
+        brightness: Number(brightness),
+        contrast: Number(contrast),
+        saturation: Number(saturation),
+        blur: Number(blur),
+        rotation: Number(rotation),
+        flipH,
+        flipV
+    };
+    const result = await window.electronAPI.applyPhotoEdits(currentEditingPhoto.id, payload);
+    if (!result.success) { alert(result.error || 'Could not save edits'); return; }
+
+    const photoCard = document.querySelector(`.photo-card[data-photo-id="${currentEditingPhoto.id}"] img`);
+    if (photoCard) { photoCard.style.filter = ''; photoCard.style.transform = ''; }
+
+    await loadPhotos();
+    galleryVisibleCount = Math.max(galleryVisibleCount, photos.length);
+    renderGallery();
     toggleEditor();
 }
 
-function resetEdits() {
-    resetEditorControls();
-}
+function resetEdits() { resetEditorControls(); }
 
 async function exportPhoto() {
     if (!currentEditingPhoto) return;
-    
     const result = await window.electronAPI.exportPhoto(currentEditingPhoto.id, currentEditingPhoto.name);
-    if (result.success) {
-        alert('Photo exported successfully!');
-    }
+    if (result.success) alert('Photo exported successfully!');
 }
 
-function setView(view) {
+function setView(view, ev) {
     document.querySelectorAll('.view-btn').forEach(btn => btn.classList.remove('active'));
-    event.target.classList.add('active');
-    
+    const t = (ev && ev.target) || (typeof event !== 'undefined' ? event.target : null);
+    if (t && t.classList) t.classList.add('active');
     const gallery = document.getElementById('gallery');
     if (view === 'list') {
         gallery.classList.add('list-view');
@@ -606,22 +628,17 @@ function updateCounts() {
     document.getElementById('allCount').textContent = photos.length;
     document.getElementById('peopleCount').textContent = photos.filter(p => p.faces > 0).length;
     document.getElementById('favCount').textContent = photos.filter(p => p.favorite).length;
+    const tl = document.getElementById('timelineCount');
+    if (tl) tl.textContent = photos.length;
 }
 
-// Update storage info display
-async function updateStorageInfo() {
-    const result = await window.electronAPI.getStorageInfo();
+async function syncAzure() {
+    const result = await window.electronAPI.syncAzureBlob({});
+    if (result.skipped) { alert(result.message || 'Azure Blob sync is not configured.'); return; }
     if (result.success) {
-        const { totalSize, photoCount } = result.info;
-        const sizeInMB = (totalSize / (1024 * 1024)).toFixed(2);
-        
-        const storageText = document.querySelector('.storage-info .storage-text');
-        if (storageText) {
-            storageText.innerHTML = `
-                <span>${photoCount} photos</span>
-                <span style="font-size: 11px; opacity: 0.7;">${sizeInMB} MB</span>
-            `;
-        }
+        alert(`Uploaded ${result.uploaded} file(s) to container "${result.container}".`);
+    } else {
+        alert(result.error || 'Sync failed');
     }
 }
 
@@ -634,13 +651,8 @@ document.addEventListener('keydown', (e) => {
         if (e.key === 'ArrowLeft') previousPhoto();
         if (e.key === 'f' || e.key === 'F') toggleFavorite();
     }
-    
-    // Delete selected photos
-    if (e.key === 'Delete' && selectedPhotos.size > 0) {
-        deleteSelected();
-    }
-    
-    // Select all
+    if (e.key === 'Delete' && selectedPhotos.size > 0) deleteSelected();
+    if (e.key === 'Escape' && selectedPhotos.size > 0) clearSelection();
     if ((e.ctrlKey || e.metaKey) && e.key === 'a') {
         e.preventDefault();
         const filtered = getFilteredPhotos();
