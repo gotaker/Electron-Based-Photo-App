@@ -1,785 +1,984 @@
-import { app, BrowserWindow, ipcMain, dialog } from 'electron';
-import path from 'path';
-import fs from 'fs';
+/**
+ * PhotoVault — Electron Main Process
+ * Handles: window lifecycle, IPC, file I/O, Sharp pipeline,
+ *           EXIF reading, Azure Blob, Google Photos OAuth, Apple Photos sync
+ */
+
+import { app, BrowserWindow, ipcMain, dialog, shell, net } from 'electron';
+import path  from 'path';
+import fs    from 'fs';
 import { fileURLToPath } from 'url';
-import { dirname } from 'path';
-import Store from 'electron-store';
+import { createRequire } from 'module';
 import crypto from 'crypto';
-import sharp from 'sharp';
-import exifr from 'exifr';
-import { getAzureSyncStatus, syncAzureBlob, analyzeFaceCountForImageFile } from './services/azureSync.mjs';
+import http   from 'http';
+import { exec } from 'child_process';
+import { promisify } from 'util';
 
-// ES modules don't have __dirname, so we need to create it
+const execAsync  = promisify(exec);
 const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
+const __dirname  = path.dirname(__filename);
+const require    = createRequire(import.meta.url);
 
-// Initialize electron-store for persistent data
-const store = new Store();
+// ── Third-party deps ─────────────────────────────────────────
+const Store  = require('electron-store');
+const sharp  = require('sharp');
+const exifr  = require('exifr');
 
-let mainWindow;
+// ── App-wide stores ───────────────────────────────────────────
+const store     = new Store({ name: 'photovault-app' });
+const syncStore = new Store({ name: 'photovault-sync' });
 
-// Storage paths - initialize early
-let storagePath = store.get('storagePath');
-let photosDir = storagePath ? path.join(storagePath, 'PhotoVault', 'photos') : null;
-let thumbsDir = storagePath ? path.join(storagePath, 'PhotoVault', 'thumbnails') : null;
-
-console.log('Initial storage paths:', { storagePath, photosDir, thumbsDir });
-
-// Ask user to choose storage location
-async function chooseStorageLocation() {
-    const result = await dialog.showOpenDialog(mainWindow, {
-        title: 'Choose PhotoVault Storage Location',
-        properties: ['openDirectory', 'createDirectory'],
-        message: 'Select a folder where PhotoVault will store your photos'
-    });
-
-    if (!result.canceled && result.filePaths.length > 0) {
-        return result.filePaths[0];
-    }
-    return null;
+// ── Storage root ──────────────────────────────────────────────
+function getStorageRoot() {
+    return store.get('storageLocation',
+        path.join(app.getPath('pictures'), 'PhotoVault'));
 }
 
-// Initialize storage with user-chosen or default location
-async function initializeStorage() {
-    let currentStoragePath = store.get('storagePath');
-    
-    console.log('initializeStorage called, current path:', currentStoragePath);
-    
-    // If no storage path set, ask user
-    if (!currentStoragePath) {
-        console.log('No storage path set, showing dialog...');
-        // Show dialog to choose location
-        currentStoragePath = await chooseStorageLocation();
-        
-        // If user cancelled, use default location
-        if (!currentStoragePath) {
-            currentStoragePath = app.getPath('documents');
-            console.log('User cancelled, using default:', currentStoragePath);
-        } else {
-            console.log('User chose:', currentStoragePath);
-        }
-        
-        // Save the chosen path
-        store.set('storagePath', currentStoragePath);
-    }
-    
-    // Set up directories
-    storagePath = currentStoragePath;
-    photosDir = path.join(storagePath, 'PhotoVault', 'photos');
-    thumbsDir = path.join(storagePath, 'PhotoVault', 'thumbnails');
-    
-    console.log('Setting up directories:', { photosDir, thumbsDir });
-    
-    // Create directories
-    if (!fs.existsSync(photosDir)) {
-        console.log('Creating photos directory:', photosDir);
-        fs.mkdirSync(photosDir, { recursive: true });
-    }
-    if (!fs.existsSync(thumbsDir)) {
-        console.log('Creating thumbnails directory:', thumbsDir);
-        fs.mkdirSync(thumbsDir, { recursive: true });
-    }
-    
-    console.log('📁 Photo storage initialized:');
-    console.log('   Storage Root:', storagePath);
-    console.log('   Photos:', photosDir);
-    console.log('   Thumbnails:', thumbsDir);
-    
-    return { photosDir, thumbsDir, storagePath };
+function ensureDir(p) {
+    if (!fs.existsSync(p)) fs.mkdirSync(p, { recursive: true });
+    return p;
 }
 
-// Generate unique filename
-function generatePhotoId() {
-    return crypto.randomBytes(16).toString('hex');
+// ── Window ────────────────────────────────────────────────────
+// Safe accessor — never throws even before createWindow() has run.
+function getWin() {
+    return BrowserWindow.getFocusedWindow()
+        ?? BrowserWindow.getAllWindows()[0]
+        ?? null;
 }
 
-// Copy photo to app storage
-async function copyPhotoToStorage(sourcePath, photoId) {
-    if (!photosDir) {
-        throw new Error('Storage not initialized - photosDir is null');
-    }
-    
-    const ext = path.extname(sourcePath);
-    const date = new Date();
-    const yearMonth = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
-    
-    // Create year-month folder
-    const monthDir = path.join(photosDir, yearMonth);
-    if (!fs.existsSync(monthDir)) {
-        console.log('Creating month directory:', monthDir);
-        fs.mkdirSync(monthDir, { recursive: true });
-    }
-    
-    const destPath = path.join(monthDir, `${photoId}${ext}`);
-    
-    console.log('Copying photo from', sourcePath, 'to', destPath);
-    
-    // Copy file
-    fs.copyFileSync(sourcePath, destPath);
-    
-    console.log('Photo copied successfully');
-    
-    return {
-        storagePath: destPath,
-        relativePath: path.join(yearMonth, `${photoId}${ext}`)
-    };
-}
-
-async function readExifMetadata(filePath) {
-    try {
-        const exif = await exifr.parse(filePath, {
-            pick: ['DateTimeOriginal', 'CreateDate', 'ModifyDate', 'Make', 'Model']
-        });
-        if (!exif) return {};
-        const raw = exif.DateTimeOriginal || exif.CreateDate || exif.ModifyDate;
-        let dt = raw;
-        if (typeof raw === 'string') {
-            dt = new Date(raw);
-        }
-        if (!(dt instanceof Date) || Number.isNaN(dt.getTime())) {
-            return {};
-        }
-        return {
-            captureDateISO: dt.toISOString(),
-            displayDate: dt.toLocaleDateString(),
-            cameraMake: exif.Make || null,
-            cameraModel: exif.Model || null
-        };
-    } catch (e) {
-        console.warn('EXIF read skipped:', e.message);
-        return {};
-    }
-}
-
-// Create thumbnail (resized for gallery performance)
-async function createThumbnail(sourcePath, photoId) {
-    if (!thumbsDir) {
-        throw new Error('Storage not initialized - thumbsDir is null');
-    }
-
-    const thumbPath = path.join(thumbsDir, `${photoId}.jpg`);
-
-    console.log('Creating thumbnail from', sourcePath, 'to', thumbPath);
-
-    await sharp(sourcePath)
-        .rotate()
-        .resize(400, 400, { fit: 'inside', withoutEnlargement: true })
-        .jpeg({ quality: 85 })
-        .toFile(thumbPath);
-
-    console.log('Thumbnail created successfully');
-
-    return thumbPath;
-}
-
-function buildEditedImagePipeline(sourcePath, edits) {
-    const {
-        filter = 'none',
-        brightness = 100,
-        contrast = 100,
-        saturation = 100,
-        blur = 0,
-        rotation = 0,
-        flipH = false,
-        flipV = false
-    } = edits;
-
-    let pipeline = sharp(sourcePath).rotate(rotation);
-    if (flipH) pipeline = pipeline.flop();
-    if (flipV) pipeline = pipeline.flip();
-    if (blur > 0) {
-        pipeline = pipeline.blur(Math.min(10, Math.max(0.1, blur)));
-    }
-
-    switch (filter) {
-        case 'grayscale':
-            pipeline = pipeline.grayscale();
-            break;
-        case 'sepia':
-            pipeline = pipeline.grayscale().tint({ r: 243, g: 229, b: 171 });
-            break;
-        case 'vintage':
-            pipeline = pipeline.modulate({ saturation: 0.85 }).gamma(1.05);
-            break;
-        case 'warm':
-            pipeline = pipeline.tint({ r: 255, g: 235, b: 210 });
-            break;
-        case 'cool':
-            pipeline = pipeline.tint({ r: 210, g: 230, b: 255 });
-            break;
-        case 'vivid':
-            pipeline = pipeline.modulate({ saturation: 1.45, brightness: 1.05 });
-            break;
-        case 'dramatic':
-            pipeline = pipeline.gamma(0.92).linear(1.15, -18);
-            break;
-        default:
-            break;
-    }
-
-    const b = Math.max(0.25, Math.min(2, brightness / 100));
-    const s = Math.max(0, Math.min(2, saturation / 100));
-    pipeline = pipeline.modulate({ brightness: b, saturation: s });
-
-    const c = Math.max(0.5, Math.min(1.5, contrast / 100));
-    const gamma = 1 / c;
-    pipeline = pipeline.gamma(gamma);
-
-    return pipeline;
-}
-
-// Get file as base64 (for displaying in browser)
-function getPhotoAsBase64(photoPath) {
-    try {
-        console.log('Reading photo as Base64:', photoPath);
-        
-        if (!fs.existsSync(photoPath)) {
-            console.error('❌ Photo file not found:', photoPath);
-            return null;
-        }
-        
-        const data = fs.readFileSync(photoPath);
-        const ext = path.extname(photoPath).toLowerCase();
-        const mimeType = {
-            '.jpg': 'image/jpeg',
-            '.jpeg': 'image/jpeg',
-            '.png': 'image/png',
-            '.gif': 'image/gif',
-            '.bmp': 'image/bmp',
-            '.webp': 'image/webp'
-        }[ext] || 'image/jpeg';
-        
-        const base64 = `data:${mimeType};base64,${data.toString('base64')}`;
-        console.log(`✅ Read photo successfully (${data.length} bytes, Base64: ${base64.length} chars)`);
-        
-        return base64;
-    } catch (error) {
-        console.error('❌ Error reading photo:', error);
-        return null;
-    }
-}
-
-// Delete photo files
-function deletePhotoFiles(photoId, relativePath) {
-    try {
-        if (!photosDir || !thumbsDir) {
-            throw new Error('Storage not initialized');
-        }
-        
-        // Delete main photo
-        const photoPath = path.join(photosDir, relativePath);
-        if (fs.existsSync(photoPath)) {
-            console.log('Deleting photo:', photoPath);
-            fs.unlinkSync(photoPath);
-        }
-        
-        const thumbJpg = path.join(thumbsDir, `${photoId}.jpg`);
-        if (fs.existsSync(thumbJpg)) {
-            console.log('Deleting thumbnail:', thumbJpg);
-            fs.unlinkSync(thumbJpg);
-        }
-        const thumbExtensions = ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp'];
-        for (const ext of thumbExtensions) {
-            const thumbPath = path.join(thumbsDir, `${photoId}${ext}`);
-            if (fs.existsSync(thumbPath)) {
-                console.log('Deleting thumbnail:', thumbPath);
-                fs.unlinkSync(thumbPath);
-                break;
-            }
-        }
-    } catch (error) {
-        console.error('Error deleting photo files:', error);
-    }
-}
-
-// Create the main application window
 function createWindow() {
-    win.setIcon(path.join(__dirname, 'icon.png'));
-    mainWindow = new BrowserWindow({
-        width: 1400,
-        height: 900,
-        minWidth: 1000,
+    const w = new BrowserWindow({
+        width: 1280,
+        height: 800,
+        minWidth: 900,
         minHeight: 600,
+        titleBarStyle: process.platform === 'darwin' ? 'hiddenInset' : 'default',
         webPreferences: {
-            nodeIntegration: false,
+            preload:          path.join(__dirname, 'preload.js'),
             contextIsolation: true,
-            preload: path.join(__dirname, 'preload.js')
+            nodeIntegration:  false,
         },
-        backgroundColor: '#667eea',
-        icon: path.join(__dirname, 'build/icon.png'),
-        show: false // Don't show until ready
     });
-
-    // Load the application
-    mainWindow.loadFile('renderer/index.html');
-
-    // Show window when ready
-    mainWindow.once('ready-to-show', async () => {
-        // Initialize storage before showing window
-        await initializeStorage();
-        mainWindow.show();
-    });
-
-    // Open DevTools in development
-    if (process.argv.includes('--dev')) {
-        mainWindow.webContents.openDevTools();
-    }
-
-    mainWindow.on('closed', () => {
-        mainWindow = null;
-    });
+    w.loadFile(path.join(__dirname, 'renderer', 'index.html'));
+    return w;
 }
 
-// App lifecycle
 app.whenReady().then(() => {
     createWindow();
-
     app.on('activate', () => {
-        if (BrowserWindow.getAllWindows().length === 0) {
-            createWindow();
-        }
+        if (BrowserWindow.getAllWindows().length === 0) createWindow();
     });
+}).catch(err => {
+    console.error('App failed to start:', err);
+    app.quit();
 });
 
 app.on('window-all-closed', () => {
-    if (process.platform !== 'darwin') {
-        app.quit();
-    }
+    if (process.platform !== 'darwin') app.quit();
 });
 
-// IPC Handlers for file operations
-ipcMain.handle('save-photo', async (event, photoData) => {
-    try {
-        console.log('\n=== SAVE PHOTO ===');
-        console.log('Received photo data:', photoData);
-        
-        // Get current photos metadata
-        const photos = store.get('photos', []);
-        console.log(`Current photo count: ${photos.length}`);
-        
-        // Add metadata without base64 data
-        const metadata = {
-            id: photoData.id,
-            name: photoData.name,
-            storagePath: photoData.storagePath,
-            relativePath: photoData.relativePath,
-            thumbnailPath: photoData.thumbnailPath,
-            originalPath: photoData.originalPath,
-            date: photoData.date,
-            dateAdded: photoData.dateAdded,
-            captureDateISO: photoData.captureDateISO || null,
-            cameraMake: photoData.cameraMake || null,
-            cameraModel: photoData.cameraModel || null,
-            favorite: photoData.favorite || false,
-            faces: photoData.faces || 0,
-            album: photoData.album || null,
-            tags: photoData.tags || [],
-            fileSize: photoData.fileSize || 0
-        };
-        
-        photos.push(metadata);
-        store.set('photos', photos);
-        
-        console.log('✅ Photo saved:', metadata.name);
-        console.log(`New photo count: ${photos.length}`);
-        
-        return { success: true, photo: metadata };
-    } catch (error) {
-        console.error('❌ Error saving photo:', error);
-        return { success: false, error: error.message };
-    }
+// Surface main-process promise rejections clearly instead of swallowing them.
+process.on('unhandledRejection', (reason) => {
+    console.error('[PhotoVault] Unhandled rejection:', reason);
 });
+
+
+// ══════════════════════════════════════════════════════════════
+//  PHOTO CRUD
+// ══════════════════════════════════════════════════════════════
 
 ipcMain.handle('get-photos', async () => {
     try {
-        console.log('\n=== GET PHOTOS ===');
         const photos = store.get('photos', []);
-        
-        console.log(`Loading ${photos.length} photos...`);
-        
-        // Add base64 data for thumbnails
-        const photosWithData = photos.map((photo, index) => {
-            console.log(`Processing photo ${index + 1}: ${photo.name}`);
-            const thumbData = getPhotoAsBase64(photo.thumbnailPath);
-            
-            if (!thumbData) {
-                console.warn(`⚠️ Failed to load thumbnail for: ${photo.name}`);
+        const root   = getStorageRoot();
+        const thumbDir = path.join(root, 'thumbnails');
+
+        const enriched = photos.map(p => {
+            const thumbPath = p.thumbnailPath || path.join(thumbDir, p.id + '.jpg');
+            let src = '';
+            if (fs.existsSync(thumbPath)) {
+                const data = fs.readFileSync(thumbPath);
+                src = 'data:image/jpeg;base64,' + data.toString('base64');
             }
-            
-            return {
-                ...photo,
-                src: thumbData || 'data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMjAwIiBoZWlnaHQ9IjIwMCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48cmVjdCB3aWR0aD0iMjAwIiBoZWlnaHQ9IjIwMCIgZmlsbD0iI2NjYyIvPjx0ZXh0IHg9IjUwJSIgeT0iNTAlIiBmb250LXNpemU9IjE2IiBmaWxsPSIjNjY2IiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBkeT0iLjNlbSI+Tm8gSW1hZ2U8L3RleHQ+PC9zdmc+'
-            };
+            return { ...p, src };
         });
-        
-        console.log(`✅ Loaded ${photosWithData.length} photos with thumbnails`);
-        
-        return { success: true, photos: photosWithData };
-    } catch (error) {
-        console.error('❌ Error getting photos:', error);
-        return { success: false, error: error.message, photos: [] };
+        return { success: true, photos: enriched };
+    } catch (err) {
+        return { success: false, error: err.message };
     }
 });
 
-ipcMain.handle('get-full-photo', async (event, photoId) => {
+ipcMain.handle('get-full-photo', async (_e, photoId) => {
     try {
-        console.log('\n=== GET FULL PHOTO ===');
-        console.log('Photo ID:', photoId);
-        
         const photos = store.get('photos', []);
-        const photo = photos.find(p => p.id === photoId);
-        
-        if (!photo) {
-            console.error('❌ Photo not found');
-            return { success: false, error: 'Photo not found' };
+        const photo  = photos.find(p => p.id === photoId);
+        if (!photo) return { success: false, error: 'Photo not found' };
+
+        let src = '';
+        if (photo.storagePath && fs.existsSync(photo.storagePath)) {
+            const data = fs.readFileSync(photo.storagePath);
+            const ext  = path.extname(photo.storagePath).toLowerCase();
+            const mime = ext === '.png' ? 'image/png'
+                       : ext === '.webp' ? 'image/webp'
+                       : 'image/jpeg';
+            src = `data:${mime};base64,` + data.toString('base64');
         }
-        
-        // Return full resolution image
-        const fullData = getPhotoAsBase64(photo.storagePath);
-        
-        if (!fullData) {
-            console.error('❌ Could not load photo file');
-            return { success: false, error: 'Could not load photo file' };
-        }
-        
-        console.log('✅ Full photo loaded');
-        
-        return { 
-            success: true, 
-            photo: {
-                ...photo,
-                src: fullData
-            }
-        };
-    } catch (error) {
-        console.error('❌ Error getting full photo:', error);
-        return { success: false, error: error.message };
+        return { success: true, photo: { ...photo, src } };
+    } catch (err) {
+        return { success: false, error: err.message };
     }
 });
 
-ipcMain.handle('update-photo', async (event, photoId, updates) => {
+ipcMain.handle('save-photo', async (_e, metadata) => {
     try {
         const photos = store.get('photos', []);
-        const index = photos.findIndex(p => p.id === photoId);
-        if (index !== -1) {
-            photos[index] = { ...photos[index], ...updates };
-            store.set('photos', photos);
-            return { success: true, photo: photos[index] };
-        }
-        return { success: false, error: 'Photo not found' };
-    } catch (error) {
-        return { success: false, error: error.message };
-    }
-});
-
-ipcMain.handle('delete-photo', async (event, photoId) => {
-    try {
-        console.log('\n=== DELETE PHOTO ===');
-        console.log('Photo ID:', photoId);
-        
-        const photos = store.get('photos', []);
-        const photo = photos.find(p => p.id === photoId);
-        
-        if (photo) {
-            // Delete physical files
-            deletePhotoFiles(photo.id, photo.relativePath);
-        }
-        
-        const filtered = photos.filter(p => p.id !== photoId);
-        store.set('photos', filtered);
-        
-        console.log('✅ Photo deleted');
-        
-        return { success: true };
-    } catch (error) {
-        console.error('❌ Error deleting photo:', error);
-        return { success: false, error: error.message };
-    }
-});
-
-ipcMain.handle('delete-photos', async (event, photoIds) => {
-    try {
-        console.log('\n=== DELETE PHOTOS ===');
-        console.log('Photo IDs:', photoIds);
-        
-        const photos = store.get('photos', []);
-        
-        // Delete physical files for each photo
-        for (const photoId of photoIds) {
-            const photo = photos.find(p => p.id === photoId);
-            if (photo) {
-                deletePhotoFiles(photo.id, photo.relativePath);
-            }
-        }
-        
-        const filtered = photos.filter(p => !photoIds.includes(p.id));
-        store.set('photos', filtered);
-        
-        console.log(`✅ Deleted ${photoIds.length} photos`);
-        
-        return { success: true };
-    } catch (error) {
-        console.error('❌ Error deleting photos:', error);
-        return { success: false, error: error.message };
-    }
-});
-
-ipcMain.handle('apply-photo-edits', async (event, photoId, edits) => {
-    try {
-        const photos = store.get('photos', []);
-        const index = photos.findIndex(p => p.id === photoId);
-        if (index === -1) {
-            return { success: false, error: 'Photo not found' };
-        }
-        const photo = photos[index];
-        const ext = path.extname(photo.storagePath).toLowerCase();
-        const supported = ['.jpg', '.jpeg', '.png', '.webp'];
-        if (!supported.includes(ext)) {
-            return { success: false, error: 'Editing is supported for JPEG, PNG, and WebP only.' };
-        }
-        const pipeline = buildEditedImagePipeline(photo.storagePath, edits);
-        let buffer;
-        if (ext === '.png') {
-            buffer = await pipeline.png().toBuffer();
-        } else if (ext === '.webp') {
-            buffer = await pipeline.webp({ quality: 90 }).toBuffer();
-        } else {
-            buffer = await pipeline.jpeg({ quality: 92 }).toBuffer();
-        }
-        fs.writeFileSync(photo.storagePath, buffer);
-        const stats = fs.statSync(photo.storagePath);
-        const newThumb = await createThumbnail(photo.storagePath, photoId);
-        photos[index] = {
-            ...photo,
-            fileSize: stats.size,
-            thumbnailPath: newThumb
-        };
+        const idx    = photos.findIndex(p => p.id === metadata.id);
+        if (idx >= 0) photos[idx] = metadata;
+        else photos.push(metadata);
         store.set('photos', photos);
         return { success: true };
-    } catch (error) {
-        console.error('apply-photo-edits:', error);
-        return { success: false, error: error.message };
+    } catch (err) {
+        return { success: false, error: err.message };
     }
 });
 
-ipcMain.handle('azure-sync-status', async () => {
-    return getAzureSyncStatus();
+ipcMain.handle('update-photo', async (_e, photoId, changes) => {
+    try {
+        const photos = store.get('photos', []);
+        const idx    = photos.findIndex(p => p.id === photoId);
+        if (idx < 0) return { success: false, error: 'Photo not found' };
+        photos[idx] = { ...photos[idx], ...changes };
+        store.set('photos', photos);
+        return { success: true };
+    } catch (err) {
+        return { success: false, error: err.message };
+    }
 });
 
-ipcMain.handle('azure-blob-sync', async (event, options) => {
-    return syncAzureBlob(store, options);
+ipcMain.handle('delete-photos', async (_e, photoIds) => {
+    try {
+        const photos = store.get('photos', []);
+        const toDelete = photos.filter(p => photoIds.includes(p.id));
+
+        // Delete files from disk
+        for (const p of toDelete) {
+            try { if (p.storagePath   && fs.existsSync(p.storagePath))   fs.unlinkSync(p.storagePath); }   catch (_) {}
+            try { if (p.thumbnailPath && fs.existsSync(p.thumbnailPath)) fs.unlinkSync(p.thumbnailPath); } catch (_) {}
+        }
+
+        store.set('photos', photos.filter(p => !photoIds.includes(p.id)));
+        return { success: true };
+    } catch (err) {
+        return { success: false, error: err.message };
+    }
 });
 
-// Album operations
-ipcMain.handle('save-album', async (event, albumData) => {
+
+// ══════════════════════════════════════════════════════════════
+//  FILE IMPORT
+// ══════════════════════════════════════════════════════════════
+
+ipcMain.handle('open-file-dialog', async () => {
+    try {
+        const { canceled, filePaths } = await dialog.showOpenDialog(getWin(), {
+            properties: ['openFile', 'multiSelections'],
+            filters: [
+                { name: 'Images', extensions: ['jpg','jpeg','png','webp','heic','heif','tiff','bmp'] }
+            ]
+        });
+        if (canceled || filePaths.length === 0) return { success: false, files: [] };
+
+        const root     = getStorageRoot();
+        const now      = new Date();
+        const monthDir = ensureDir(path.join(root, 'photos',
+            `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}`));
+        const thumbDir = ensureDir(path.join(root, 'thumbnails'));
+
+        const files = [];
+        for (const src of filePaths) {
+            const id  = crypto.randomBytes(16).toString('hex');
+            const ext = path.extname(src).toLowerCase() || '.jpg';
+            const dest = path.join(monthDir, id + ext);
+            const thumb = path.join(thumbDir, id + '.jpg');
+
+            // Copy original
+            fs.copyFileSync(src, dest);
+
+            // Generate 400×400 thumbnail
+            try {
+                await sharp(dest).rotate().resize(400, 400, { fit: 'cover' }).jpeg({ quality: 85 }).toFile(thumb);
+            } catch (_) {
+                try { fs.copyFileSync(dest, thumb); } catch (_2) {}
+            }
+
+            // EXIF
+            let captureDateISO = null, cameraMake = null, cameraModel = null;
+            try {
+                const exif = await exifr.parse(dest, ['DateTimeOriginal','Make','Model']);
+                if (exif?.DateTimeOriginal) captureDateISO = new Date(exif.DateTimeOriginal).toISOString();
+                cameraMake  = exif?.Make  || null;
+                cameraModel = exif?.Model || null;
+            } catch (_) {}
+
+            // Face count (Azure optional)
+            let faces = 0;
+            const faceEndpoint = process.env.AZURE_FACE_ENDPOINT;
+            const faceKey      = process.env.AZURE_FACE_KEY;
+            if (faceEndpoint && faceKey) {
+                try {
+                    const imgData = fs.readFileSync(dest);
+                    const res = await fetch(`${faceEndpoint}/face/v1.0/detect`, {
+                        method: 'POST',
+                        headers: { 'Ocp-Apim-Subscription-Key': faceKey, 'Content-Type': 'application/octet-stream' },
+                        body: imgData,
+                    });
+                    const json = await res.json();
+                    faces = Array.isArray(json) ? json.length : 0;
+                } catch (_) {}
+            }
+
+            const stat = fs.statSync(dest);
+            const dateAdded = new Date().toISOString();
+
+            files.push({
+                id,
+                name: path.basename(src),
+                storagePath:   dest,
+                relativePath:  path.relative(root, dest),
+                thumbnailPath: thumb,
+                originalPath:  src,
+                displayDate:   captureDateISO
+                    ? new Date(captureDateISO).toLocaleDateString()
+                    : now.toLocaleDateString(),
+                dateAdded,
+                captureDateISO,
+                cameraMake,
+                cameraModel,
+                fileSize: stat.size,
+                faces,
+            });
+        }
+
+        return { success: true, files };
+    } catch (err) {
+        return { success: false, error: err.message, files: [] };
+    }
+});
+
+
+// ══════════════════════════════════════════════════════════════
+//  EXPORT / SHARE
+// ══════════════════════════════════════════════════════════════
+
+ipcMain.handle('export-photo', async (_e, photoId, suggestedName) => {
+    try {
+        const photos = store.get('photos', []);
+        const photo  = photos.find(p => p.id === photoId);
+        if (!photo || !photo.storagePath) return { success: false, error: 'Photo not found' };
+
+        const { canceled, filePath } = await dialog.showSaveDialog(getWin(), {
+            defaultPath: suggestedName || photo.name,
+            filters: [{ name: 'Images', extensions: ['jpg','jpeg','png','webp'] }]
+        });
+        if (canceled || !filePath) return { success: false, error: 'Cancelled' };
+
+        fs.copyFileSync(photo.storagePath, filePath);
+        return { success: true, savedPath: filePath };
+    } catch (err) {
+        return { success: false, error: err.message };
+    }
+});
+
+
+// ══════════════════════════════════════════════════════════════
+//  ALBUMS
+// ══════════════════════════════════════════════════════════════
+
+ipcMain.handle('save-album', async (_e, album) => {
     try {
         const albums = store.get('albums', []);
-        albums.push(albumData);
+        const idx = albums.findIndex(a => a.id === album.id);
+        if (idx >= 0) albums[idx] = album; else albums.push(album);
         store.set('albums', albums);
-        return { success: true, album: albumData };
-    } catch (error) {
-        return { success: false, error: error.message };
-    }
+        return { success: true };
+    } catch (err) { return { success: false, error: err.message }; }
 });
 
 ipcMain.handle('get-albums', async () => {
     try {
-        const albums = store.get('albums', []);
-        return { success: true, albums };
-    } catch (error) {
-        return { success: false, error: error.message, albums: [] };
-    }
+        return { success: true, albums: store.get('albums', []) };
+    } catch (err) { return { success: false, error: err.message }; }
 });
 
-ipcMain.handle('update-album', async (event, albumId, updates) => {
+ipcMain.handle('delete-album', async (_e, albumId) => {
     try {
-        const albums = store.get('albums', []);
-        const index = albums.findIndex(a => a.id === albumId);
-        if (index !== -1) {
-            albums[index] = { ...albums[index], ...updates };
-            store.set('albums', albums);
-            return { success: true, album: albums[index] };
-        }
-        return { success: false, error: 'Album not found' };
-    } catch (error) {
-        return { success: false, error: error.message };
-    }
-});
-
-ipcMain.handle('delete-album', async (event, albumId) => {
-    try {
-        const albums = store.get('albums', []);
-        const filtered = albums.filter(a => a.id !== albumId);
-        store.set('albums', filtered);
+        store.set('albums', store.get('albums', []).filter(a => a.id !== albumId));
         return { success: true };
-    } catch (error) {
-        return { success: false, error: error.message };
-    }
+    } catch (err) { return { success: false, error: err.message }; }
 });
 
-// Change storage location
-ipcMain.handle('change-storage-location', async () => {
+
+// ══════════════════════════════════════════════════════════════
+//  PHOTO EDITING (Sharp)
+// ══════════════════════════════════════════════════════════════
+
+ipcMain.handle('apply-photo-edits', async (_e, photoId, edits) => {
     try {
-        const newPath = await chooseStorageLocation();
-        
-        if (!newPath) {
-            return { success: false, error: 'No location selected' };
-        }
-        
-        const oldPath = store.get('storagePath');
-        
-        // Update storage path
-        store.set('storagePath', newPath);
-        
-        // Reinitialize storage
-        await initializeStorage();
-        
-        return { 
-            success: true, 
-            oldPath,
-            newPath,
-            message: 'Storage location updated. Please move your photos manually if needed.'
+        const photos = store.get('photos', []);
+        const photo  = photos.find(p => p.id === photoId);
+        if (!photo || !photo.storagePath) return { success: false, error: 'Photo not found' };
+
+        let pipeline = sharp(photo.storagePath).rotate(edits.rotation || 0);
+
+        const { brightness=100, contrast=100, saturation=100, blur=0, flipH, flipV } = edits;
+
+        pipeline = pipeline.modulate({
+            brightness: brightness / 100,
+            saturation: saturation / 100,
+        });
+
+        if (blur > 0) pipeline = pipeline.blur(blur);
+        if (flipH)    pipeline = pipeline.flop();
+        if (flipV)    pipeline = pipeline.flip();
+
+        // Apply filter as a tint/greyscale operation
+        const filterMap = {
+            grayscale: () => pipeline.grayscale(),
+            sepia:     () => pipeline.grayscale().tint({ r:112, g:66, b:20 }),
+            vintage:   () => pipeline.grayscale().tint({ r:100, g:80, b:60 }).modulate({ brightness: 1.05 }),
+            warm:      () => pipeline.tint({ r:255, g:200, b:150 }),
+            cool:      () => pipeline.tint({ r:150, g:180, b:255 }),
+            vivid:     () => pipeline.modulate({ saturation: 1.6 }),
+            dramatic:  () => pipeline.grayscale().modulate({ brightness: 0.9 }),
         };
-    } catch (error) {
-        return { success: false, error: error.message };
-    }
-});
+        if (filterMap[edits.filter]) pipeline = filterMap[edits.filter]();
 
-// File dialog for importing photos
-ipcMain.handle('open-file-dialog', async () => {
-    const result = await dialog.showOpenDialog(mainWindow, {
-        properties: ['openFile', 'multiSelections'],
-        filters: [
-            { name: 'Images', extensions: ['jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp'] }
-        ]
-    });
+        // Write back to same path (overwrite original)
+        const ext = path.extname(photo.storagePath).toLowerCase();
+        const outOpts = ext === '.png'  ? pipeline.png()
+                      : ext === '.webp' ? pipeline.webp()
+                      :                   pipeline.jpeg({ quality: 92 });
 
-    if (!result.canceled && result.filePaths.length > 0) {
-        const files = [];
-        
-        console.log(`\n=== IMPORTING ${result.filePaths.length} PHOTOS ===`);
-        
-        for (const filePath of result.filePaths) {
-            try {
-                const photoId = generatePhotoId();
-                
-                console.log(`\nProcessing: ${path.basename(filePath)}`);
-                console.log('  Source:', filePath);
-                console.log('  ID:', photoId);
-                
-                // Copy photo to storage
-                const { storagePath, relativePath } = await copyPhotoToStorage(filePath, photoId);
-                
-                // Create thumbnail
-                const thumbnailPath = await createThumbnail(filePath, photoId);
-                
-                // Get file stats
-                const stats = fs.statSync(filePath);
-                const exif = await readExifMetadata(filePath);
+        const tmpPath = photo.storagePath + '.tmp';
+        await outOpts.toFile(tmpPath);
+        fs.renameSync(tmpPath, photo.storagePath);
 
-                let faces = Math.floor(Math.random() * 4);
-                const faceResult = await analyzeFaceCountForImageFile(filePath);
-                if (typeof faceResult.faces === 'number') {
-                    faces = faceResult.faces;
-                }
-
-                const fileData = {
-                    id: photoId,
-                    name: path.basename(filePath),
-                    storagePath: storagePath,
-                    relativePath: relativePath,
-                    thumbnailPath: thumbnailPath,
-                    originalPath: filePath,
-                    fileSize: stats.size,
-                    dateAdded: new Date().toISOString(),
-                    date: exif.displayDate || new Date().toLocaleDateString(),
-                    captureDateISO: exif.captureDateISO || null,
-                    cameraMake: exif.cameraMake || null,
-                    cameraModel: exif.cameraModel || null,
-                    faces
-                };
-
-                files.push(fileData);
-                
-                console.log(`✅ Imported: ${path.basename(filePath)}`);
-            } catch (error) {
-                console.error(`❌ Error processing file ${filePath}:`, error);
-            }
+        // Regenerate thumbnail
+        if (photo.thumbnailPath) {
+            await sharp(photo.storagePath)
+                .resize(400, 400, { fit: 'cover' })
+                .jpeg({ quality: 85 })
+                .toFile(photo.thumbnailPath + '.tmp');
+            fs.renameSync(photo.thumbnailPath + '.tmp', photo.thumbnailPath);
         }
-        
-        console.log(`\n=== Successfully imported ${files.length} photos ===\n`);
-        
-        return { success: true, files };
+
+        return { success: true };
+    } catch (err) {
+        return { success: false, error: err.message };
     }
-    
-    return { success: false, files: [] };
 });
 
-// Export photo
-ipcMain.handle('export-photo', async (event, photoId, defaultName) => {
-    const result = await dialog.showSaveDialog(mainWindow, {
-        defaultPath: defaultName,
-        filters: [
-            { name: 'Images', extensions: ['jpg', 'jpeg', 'png', 'webp', 'gif'] }
-        ]
-    });
 
-    if (!result.canceled && result.filePath) {
-        try {
-            const photos = store.get('photos', []);
-            const photo = photos.find(p => p.id === photoId);
-            
-            if (!photo) {
-                return { success: false, error: 'Photo not found' };
-            }
-            
-            // Copy the original file
-            fs.copyFileSync(photo.storagePath, result.filePath);
-            
-            return { success: true, path: result.filePath };
-        } catch (error) {
-            return { success: false, error: error.message };
-        }
-    }
-    
-    return { success: false };
-});
+// ══════════════════════════════════════════════════════════════
+//  STORAGE MANAGEMENT
+// ══════════════════════════════════════════════════════════════
 
-// Get storage info
 ipcMain.handle('get-storage-info', async () => {
     try {
-        const photos = store.get('photos', []);
-        const totalSize = photos.reduce((sum, photo) => sum + (photo.fileSize || 0), 0);
-        const currentStoragePath = store.get('storagePath') || app.getPath('documents');
-        
-        return {
-            success: true,
-            info: {
-                photoCount: photos.length,
-                totalSize: totalSize,
-                storagePath: currentStoragePath,
-                photosPath: photosDir,
-                thumbnailsPath: thumbsDir
+        const root = getStorageRoot();
+        ensureDir(root);
+        let totalBytes = 0;
+        const walk = dir => {
+            if (!fs.existsSync(dir)) return;
+            for (const f of fs.readdirSync(dir)) {
+                const full = path.join(dir, f);
+                const stat = fs.statSync(full);
+                if (stat.isDirectory()) walk(full);
+                else totalBytes += stat.size;
             }
         };
-    } catch (error) {
-        return { success: false, error: error.message };
+        walk(root);
+        return { success: true, storageLocation: root, totalBytes };
+    } catch (err) {
+        return { success: false, error: err.message };
     }
 });
 
-// Clear all data (useful for testing)
+ipcMain.handle('change-storage-location', async () => {
+    try {
+        const { canceled, filePaths } = await dialog.showOpenDialog(getWin(), {
+            properties: ['openDirectory', 'createDirectory'],
+            title: 'Choose PhotoVault storage folder',
+        });
+        if (canceled) return { success: false };
+        store.set('storageLocation', path.join(filePaths[0], 'PhotoVault'));
+        return { success: true, newLocation: store.get('storageLocation') };
+    } catch (err) {
+        return { success: false, error: err.message };
+    }
+});
+
 ipcMain.handle('clear-all-data', async () => {
     try {
-        const photos = store.get('photos', []);
-        
-        // Delete all photo files
-        for (const photo of photos) {
-            deletePhotoFiles(photo.id, photo.relativePath);
-        }
-        
-        store.clear();
+        store.set('photos', []);
+        store.set('albums', []);
+        const root = getStorageRoot();
+        if (fs.existsSync(root)) fs.rmSync(root, { recursive: true, force: true });
         return { success: true };
-    } catch (error) {
-        return { success: false, error: error.message };
+    } catch (err) {
+        return { success: false, error: err.message };
     }
+});
+
+
+// ══════════════════════════════════════════════════════════════
+//  AZURE BLOB SYNC (optional, env-configured)
+// ══════════════════════════════════════════════════════════════
+
+ipcMain.handle('sync-azure-blob', async () => {
+    const connStr   = process.env.AZURE_STORAGE_CONNECTION_STRING;
+    const container = process.env.AZURE_STORAGE_CONTAINER || 'photovault';
+    if (!connStr) return { skipped: true, message: 'AZURE_STORAGE_CONNECTION_STRING not set.' };
+
+    try {
+        const { BlobServiceClient } = require('@azure/storage-blob');
+        const client    = BlobServiceClient.fromConnectionString(connStr);
+        const cClient   = client.getContainerClient(container);
+        await cClient.createIfNotExists();
+
+        const photos = store.get('photos', []);
+        let uploaded = 0;
+        for (const p of photos) {
+            if (!p.storagePath || !fs.existsSync(p.storagePath)) continue;
+            const blob = cClient.getBlockBlobClient(path.basename(p.storagePath));
+            await blob.uploadFile(p.storagePath);
+            uploaded++;
+        }
+        return { success: true, uploaded, container };
+    } catch (err) {
+        return { success: false, error: err.message };
+    }
+});
+
+ipcMain.handle('get-azure-sync-status', async () => {
+    return { configured: Boolean(process.env.AZURE_STORAGE_CONNECTION_STRING) };
+});
+
+
+// ══════════════════════════════════════════════════════════════
+//  SYNC CONFIG (persisted for Google/Apple sync state)
+// ══════════════════════════════════════════════════════════════
+
+ipcMain.handle('get-sync-config', async () => {
+    try {
+        const config = syncStore.get('syncConfig', null);
+        return { success: true, config };
+    } catch (err) {
+        return { success: false, error: err.message };
+    }
+});
+
+ipcMain.handle('save-sync-config', async (_e, config) => {
+    try {
+        syncStore.set('syncConfig', config);
+        return { success: true };
+    } catch (err) {
+        return { success: false, error: err.message };
+    }
+});
+
+
+// ══════════════════════════════════════════════════════════════
+//  GOOGLE PHOTOS OAUTH 2.0 (PKCE / Desktop flow)
+// ══════════════════════════════════════════════════════════════
+
+/**
+ * Opens a local HTTP server on a random port to capture the OAuth redirect,
+ * then launches the system browser for Google sign-in.
+ * Returns { success, accessToken, refreshToken, email }.
+ */
+ipcMain.handle('sync-google-auth', async (_e, { clientId, clientSecret }) => {
+    return new Promise(resolve => {
+        // Pick a random local port for the redirect URI
+        const server = http.createServer();
+        server.listen(0, '127.0.0.1', async () => {
+            const port        = server.address().port;
+            const redirectUri = `http://127.0.0.1:${port}/oauth`;
+            const scopes      = [
+                'https://www.googleapis.com/auth/photoslibrary.readonly',
+                'https://www.googleapis.com/auth/photoslibrary.appendonly',
+                'email',
+                'profile',
+            ].join(' ');
+
+            const authUrl = new URL('https://accounts.google.com/o/oauth2/v2/auth');
+            authUrl.searchParams.set('client_id',     clientId);
+            authUrl.searchParams.set('redirect_uri',  redirectUri);
+            authUrl.searchParams.set('response_type', 'code');
+            authUrl.searchParams.set('scope',         scopes);
+            authUrl.searchParams.set('access_type',   'offline');
+            authUrl.searchParams.set('prompt',        'consent');
+
+            // Open browser
+            shell.openExternal(authUrl.toString());
+
+            server.on('request', async (req, res) => {
+                const url    = new URL(req.url, `http://127.0.0.1:${port}`);
+                const code   = url.searchParams.get('code');
+                const errMsg = url.searchParams.get('error');
+
+                res.writeHead(200, { 'Content-Type': 'text/html' });
+                res.end('<html><body style="font-family:system-ui;padding:40px">'
+                    + '<h2>PhotoVault</h2>'
+                    + (errMsg ? `<p style="color:red">Auth failed: ${errMsg}</p>`
+                               : '<p>Authentication successful! You can close this tab.</p>')
+                    + '</body></html>');
+
+                server.close();
+
+                if (!code) {
+                    return resolve({ success: false, error: errMsg || 'No auth code received' });
+                }
+
+                // Exchange code for tokens
+                try {
+                    const tokenRes = await fetch('https://oauth2.googleapis.com/token', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                        body: new URLSearchParams({
+                            code,
+                            client_id:     clientId,
+                            client_secret: clientSecret,
+                            redirect_uri:  redirectUri,
+                            grant_type:    'authorization_code',
+                        }),
+                    });
+                    const tokens = await tokenRes.json();
+                    if (tokens.error) {
+                        return resolve({ success: false, error: tokens.error_description || tokens.error });
+                    }
+
+                    // Get user email
+                    let email = '';
+                    try {
+                        const profileRes = await fetch('https://www.googleapis.com/oauth2/v1/userinfo', {
+                            headers: { Authorization: `Bearer ${tokens.access_token}` },
+                        });
+                        const profile = await profileRes.json();
+                        email = profile.email || '';
+                    } catch (_) {}
+
+                    resolve({
+                        success:      true,
+                        accessToken:  tokens.access_token,
+                        refreshToken: tokens.refresh_token || '',
+                        email,
+                    });
+                } catch (err) {
+                    resolve({ success: false, error: err.message });
+                }
+            });
+        });
+
+        server.on('error', err => resolve({ success: false, error: err.message }));
+    });
+});
+
+
+// ── Token refresh helper ──────────────────────────────────────
+async function refreshGoogleToken(clientId, clientSecret, refreshToken) {
+    const res = await fetch('https://oauth2.googleapis.com/token', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams({
+            client_id:     clientId,
+            client_secret: clientSecret,
+            refresh_token: refreshToken,
+            grant_type:    'refresh_token',
+        }),
+    });
+    const data = await res.json();
+    if (data.error) throw new Error(data.error_description || data.error);
+    return data.access_token;
+}
+
+
+// ── Google Photos: get total photo count ─────────────────────
+ipcMain.handle('sync-google-photo-count', async (_e, { accessToken }) => {
+    try {
+        const res  = await fetch(
+            'https://photoslibrary.googleapis.com/v1/mediaItems?pageSize=1',
+            { headers: { Authorization: `Bearer ${accessToken}` } }
+        );
+        const data = await res.json();
+        if (data.error) return { success: false, error: data.error.message };
+        // Google doesn't expose total count directly; return a rough estimate from the first page
+        return { success: true, count: data.totalMediaItems ?? '?' };
+    } catch (err) {
+        return { success: false, error: err.message };
+    }
+});
+
+
+// ── Google Photos: list all remote items (handles pagination) ─
+ipcMain.handle('sync-google-list', async (_e, { accessToken, refreshToken, clientId, clientSecret }) => {
+    try {
+        const items = [];
+        let pageToken = null;
+        let token = accessToken;
+
+        do {
+            const url = new URL('https://photoslibrary.googleapis.com/v1/mediaItems');
+            url.searchParams.set('pageSize', '100');
+            if (pageToken) url.searchParams.set('pageToken', pageToken);
+
+            let res = await fetch(url.toString(), {
+                headers: { Authorization: `Bearer ${token}` }
+            });
+
+            // Refresh token if 401
+            if (res.status === 401 && refreshToken && clientId && clientSecret) {
+                token = await refreshGoogleToken(clientId, clientSecret, refreshToken);
+                res   = await fetch(url.toString(), {
+                    headers: { Authorization: `Bearer ${token}` }
+                });
+            }
+
+            const data = await res.json();
+            if (data.error) return { success: false, error: data.error.message };
+
+            if (data.mediaItems) items.push(...data.mediaItems);
+            pageToken = data.nextPageToken || null;
+        } while (pageToken);
+
+        return { success: true, items, accessToken: token };
+    } catch (err) {
+        return { success: false, error: err.message };
+    }
+});
+
+
+// ── Google Photos: download one item ─────────────────────────
+ipcMain.handle('sync-google-download', async (_e, { item, accessToken }) => {
+    try {
+        if (!item?.baseUrl) return { success: false, error: 'No baseUrl' };
+
+        const root     = getStorageRoot();
+        const now      = new Date();
+        const monthDir = ensureDir(path.join(root, 'photos',
+            `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}`));
+        const thumbDir = ensureDir(path.join(root, 'thumbnails'));
+
+        const id  = crypto.randomBytes(16).toString('hex');
+        const ext = item.mimeType === 'image/png' ? '.png'
+                  : item.mimeType === 'image/webp' ? '.webp'
+                  : '.jpg';
+        const dest  = path.join(monthDir, id + ext);
+        const thumb = path.join(thumbDir, id + '.jpg');
+
+        // Download full-resolution image
+        const imgRes = await fetch(`${item.baseUrl}=d`);
+        if (!imgRes.ok) return { success: false, error: `HTTP ${imgRes.status}` };
+        const buf = Buffer.from(await imgRes.arrayBuffer());
+        fs.writeFileSync(dest, buf);
+
+        // Generate thumbnail
+        try {
+            await sharp(dest).rotate().resize(400, 400, { fit: 'cover' }).jpeg({ quality: 85 }).toFile(thumb);
+        } catch (_) { fs.copyFileSync(dest, thumb); }
+
+        // EXIF
+        let captureDateISO = null, cameraMake = null, cameraModel = null;
+        try {
+            const exif = await exifr.parse(dest, ['DateTimeOriginal','Make','Model']);
+            if (exif?.DateTimeOriginal) captureDateISO = new Date(exif.DateTimeOriginal).toISOString();
+            cameraMake  = exif?.Make  || null;
+            cameraModel = exif?.Model || null;
+        } catch (_) {}
+
+        const photo = {
+            id,
+            name:          item.filename || id + ext,
+            storagePath:   dest,
+            relativePath:  path.relative(root, dest),
+            thumbnailPath: thumb,
+            originalPath:  dest,
+            date:          captureDateISO
+                ? new Date(captureDateISO).toLocaleDateString()
+                : now.toLocaleDateString(),
+            dateAdded:     now.toISOString(),
+            captureDateISO,
+            cameraMake,
+            cameraModel,
+            fileSize: buf.length,
+            favorite: false,
+            faces:    0,
+            album:    null,
+            tags:     [],
+            deleted:  false,
+            deletedAt: null,
+            editedAt:  null,
+            googleId:  item.id,
+        };
+
+        // Persist
+        const photos = store.get('photos', []);
+        photos.push(photo);
+        store.set('photos', photos);
+
+        // Build src for renderer
+        const imgData = fs.readFileSync(thumb);
+        photo.src = 'data:image/jpeg;base64,' + imgData.toString('base64');
+
+        return { success: true, photo };
+    } catch (err) {
+        return { success: false, error: err.message };
+    }
+});
+
+
+// ── Google Photos: upload one local photo ────────────────────
+ipcMain.handle('sync-google-upload', async (_e, { photo, accessToken, refreshToken, clientId, clientSecret }) => {
+    try {
+        if (!photo.storagePath || !fs.existsSync(photo.storagePath)) {
+            return { success: false, error: 'File not found on disk' };
+        }
+
+        let token = accessToken;
+        const buf = fs.readFileSync(photo.storagePath);
+        const ext = path.extname(photo.storagePath).toLowerCase();
+        const mimeType = ext === '.png' ? 'image/png'
+                       : ext === '.webp' ? 'image/webp'
+                       : 'image/jpeg';
+
+        // Step 1: Upload bytes to get an upload token
+        let uploadRes = await fetch('https://photoslibrary.googleapis.com/v1/uploads', {
+            method:  'POST',
+            headers: {
+                Authorization:          `Bearer ${token}`,
+                'Content-Type':         'application/octet-stream',
+                'X-Goog-Upload-Protocol': 'raw',
+                'X-Goog-Upload-File-Name': photo.name || 'photo.jpg',
+                'X-Goog-Upload-Content-Type': mimeType,
+            },
+            body: buf,
+        });
+
+        // Refresh token if 401
+        if (uploadRes.status === 401 && refreshToken && clientId && clientSecret) {
+            token = await refreshGoogleToken(clientId, clientSecret, refreshToken);
+            uploadRes = await fetch('https://photoslibrary.googleapis.com/v1/uploads', {
+                method: 'POST',
+                headers: {
+                    Authorization:          `Bearer ${token}`,
+                    'Content-Type':         'application/octet-stream',
+                    'X-Goog-Upload-Protocol': 'raw',
+                    'X-Goog-Upload-File-Name': photo.name || 'photo.jpg',
+                    'X-Goog-Upload-Content-Type': mimeType,
+                },
+                body: buf,
+            });
+        }
+
+        if (!uploadRes.ok) {
+            return { success: false, error: `Upload step 1 failed: HTTP ${uploadRes.status}` };
+        }
+        const uploadToken = await uploadRes.text();
+
+        // Step 2: Create media item
+        const createRes = await fetch('https://photoslibrary.googleapis.com/v1/mediaItems:batchCreate', {
+            method: 'POST',
+            headers: {
+                Authorization: `Bearer ${token}`,
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                newMediaItems: [{
+                    description: photo.name,
+                    simpleMediaItem: {
+                        fileName:    photo.name,
+                        uploadToken,
+                    }
+                }]
+            }),
+        });
+
+        const createData = await createRes.json();
+        const result     = createData.newMediaItemResults?.[0];
+        if (!result?.mediaItem?.id) {
+            return { success: false, error: result?.status?.message || 'Create failed' };
+        }
+
+        return { success: true, googleId: result.mediaItem.id, accessToken: token };
+    } catch (err) {
+        return { success: false, error: err.message };
+    }
+});
+
+
+// ══════════════════════════════════════════════════════════════
+//  APPLE PHOTOS SYNC (macOS only)
+// ══════════════════════════════════════════════════════════════
+
+/**
+ * Connect to the system Photos library via osxphotos (CLI) if available,
+ * falling back to AppleScript for a basic count.
+ */
+ipcMain.handle('sync-apple-connect', async () => {
+    if (process.platform !== 'darwin') {
+        return { success: false, error: 'Apple Photos sync is only available on macOS.' };
+    }
+
+    try {
+        // Try osxphotos first (pip install osxphotos)
+        const { stdout } = await execAsync('osxphotos info --json 2>/dev/null || echo "null"');
+        const info = JSON.parse(stdout.trim());
+        if (info && info.photos_count != null) {
+            return { success: true, photoCount: info.photos_count, library: info.library_path };
+        }
+    } catch (_) {}
+
+    // Fallback: AppleScript count
+    try {
+        const script = 'tell application "Photos" to return count of media items';
+        const { stdout } = await execAsync(`osascript -e '${script}'`);
+        const count = parseInt(stdout.trim(), 10) || 0;
+        return { success: true, photoCount: count };
+    } catch (err) {
+        return { success: false, error: 'Could not connect to Apple Photos. Ensure Photos is installed and "Automation" permission is granted in System Settings → Privacy & Security.' };
+    }
+});
+
+
+/**
+ * Run the actual Apple Photos sync.
+ * - direction: 'download' | 'bidirectional' | 'upload'
+ * - For download/bidirectional: export photos from Apple Photos not already in PhotoVault
+ * - For upload/bidirectional: import PhotoVault photos into Apple Photos via AppleScript
+ */
+ipcMain.handle('sync-apple-run', async (_e, { direction, localPhotos }) => {
+    if (process.platform !== 'darwin') {
+        return { success: false, error: 'macOS only' };
+    }
+
+    const root     = getStorageRoot();
+    const now      = new Date();
+    const monthDir = ensureDir(path.join(root, 'photos',
+        `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}`));
+    const thumbDir = ensureDir(path.join(root, 'thumbnails'));
+
+    const downloaded = [];
+    let   uploaded   = 0;
+    let   libraryCount = null;
+
+    // ── DOWNLOAD from Apple Photos ──────────────────────────
+    if (direction === 'download' || direction === 'bidirectional') {
+        try {
+            // Check osxphotos availability
+            await execAsync('which osxphotos');
+
+            // Export all photos not already in PhotoVault
+            const localAppleIds = new Set(localPhotos.filter(p => p.appleId).map(p => p.appleId));
+            const exportDir = path.join(root, '_apple_export_tmp');
+            ensureDir(exportDir);
+
+            // Export with original filenames and UUID tracking
+            const exportCmd = [
+                'osxphotos export',
+                `"${exportDir}"`,
+                '--original',
+                '--skip-edited-version',
+                '--overwrite',
+                '--export-as-hardlink',
+                '--not-missing',
+                '--quiet',
+            ].join(' ');
+
+            await execAsync(exportCmd, { timeout: 5 * 60 * 1000 });
+
+            // Scan exported files and import any new ones
+            const exportedFiles = fs.readdirSync(exportDir)
+                .filter(f => /\.(jpg|jpeg|png|webp|heic)$/i.test(f));
+
+            for (const fname of exportedFiles) {
+                const src = path.join(exportDir, fname);
+                const id  = crypto.randomBytes(16).toString('hex');
+                const ext = path.extname(fname).toLowerCase() || '.jpg';
+                const dest  = path.join(monthDir, id + ext);
+                const thumb = path.join(thumbDir, id + '.jpg');
+
+                fs.copyFileSync(src, dest);
+
+                let captureDateISO = null, cameraMake = null, cameraModel = null;
+                try {
+                    const exif = await exifr.parse(dest, ['DateTimeOriginal','Make','Model']);
+                    if (exif?.DateTimeOriginal) captureDateISO = new Date(exif.DateTimeOriginal).toISOString();
+                    cameraMake  = exif?.Make  || null;
+                    cameraModel = exif?.Model || null;
+                } catch (_) {}
+
+                try {
+                    await sharp(dest).rotate().resize(400,400,{fit:'cover'}).jpeg({quality:85}).toFile(thumb);
+                } catch (_) { fs.copyFileSync(dest, thumb); }
+
+                const stat = fs.statSync(dest);
+                const photo = {
+                    id, name: fname,
+                    storagePath: dest,
+                    relativePath: path.relative(root, dest),
+                    thumbnailPath: thumb,
+                    originalPath: dest,
+                    date: captureDateISO ? new Date(captureDateISO).toLocaleDateString() : now.toLocaleDateString(),
+                    dateAdded: now.toISOString(),
+                    captureDateISO, cameraMake, cameraModel,
+                    fileSize: stat.size,
+                    favorite: false, faces: 0, album: null, tags: [],
+                    deleted: false, deletedAt: null, editedAt: null,
+                    appleId: id,
+                };
+
+                const photos = store.get('photos', []);
+                photos.push(photo);
+                store.set('photos', photos);
+
+                const imgData = fs.readFileSync(thumb);
+                photo.src = 'data:image/jpeg;base64,' + imgData.toString('base64');
+                downloaded.push(photo);
+            }
+
+            // Cleanup
+            fs.rmSync(exportDir, { recursive: true, force: true });
+        } catch (osxphotosErr) {
+            // osxphotos not available — inform but don't fail entirely
+            if (direction === 'download') {
+                return {
+                    success: false,
+                    error: 'osxphotos is required for downloading from Apple Photos. Install with: pip install osxphotos',
+                };
+            }
+            // For bidirectional, continue to the upload step
+        }
+    }
+
+    // ── UPLOAD to Apple Photos ───────────────────────────────
+    if (direction === 'upload' || direction === 'bidirectional') {
+        const toUpload = localPhotos.filter(p => !p.appleId && !p.deleted && p.storagePath);
+        for (const p of toUpload) {
+            if (!fs.existsSync(p.storagePath)) continue;
+            try {
+                const script = `tell application "Photos" to import POSIX file "${p.storagePath}"`;
+                await execAsync(`osascript -e '${script}'`);
+                uploaded++;
+            } catch (_) {}
+        }
+    }
+
+    // Get updated library count
+    try {
+        const { stdout } = await execAsync(`osascript -e 'tell application "Photos" to return count of media items'`);
+        libraryCount = parseInt(stdout.trim(), 10) || null;
+    } catch (_) {}
+
+    return { success: true, downloaded, uploaded, libraryCount };
 });
