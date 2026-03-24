@@ -4,6 +4,10 @@
 :root {
   --sidebar-width: 230px;
   --top-bar-height: 56px;
+  /* macOS hiddenInset traffic-light clearance.
+     env(titlebar-area-height) resolves correctly in Electron 28+;
+     the 28px fallback covers older builds and non-macOS. */
+  --titlebar-height: env(titlebar-area-height, 28px);
   --sidebar-bg: #FFFFFF;
   --main-bg: #F5F5F7;
   --accent: #007AFF;
@@ -74,7 +78,13 @@ button, input, a, .nav-item, .album-item, .photo-card, .photo-select {
   user-select: none;
 }
 
-.sidebar-header { padding: 20px 16px 14px; border-bottom: 1px solid var(--separator); }
+.sidebar-header {
+  padding: calc(var(--titlebar-height) + 10px) 16px 14px;
+  border-bottom: 1px solid var(--separator);
+  /* Allow the traffic-light drag zone to pass through this area */
+  -webkit-app-region: drag;
+}
+.sidebar-header * { -webkit-app-region: no-drag; }
 
 .app-title { font-size: 22px; font-weight: 700; color: var(--text-primary); letter-spacing: -0.5px; }
 
@@ -188,7 +198,7 @@ button, input, a, .nav-item, .album-item, .photo-card, .photo-select {
   gap: 10px;
 }
 
-.top-bar-left { display: flex; align-items: center; min-width: 0; }
+.top-bar-left { display: flex; align-items: center; min-width: 0; padding-left: 4px; }
 
 .top-bar-title-group { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
 

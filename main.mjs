@@ -50,12 +50,15 @@ function getWin() {
 }
 
 function createWindow() {
+    const isMac = process.platform === 'darwin';
     const w = new BrowserWindow({
         width: 1280,
         height: 800,
         minWidth: 900,
         minHeight: 600,
-        titleBarStyle: process.platform === 'darwin' ? 'hiddenInset' : 'default',
+        titleBarStyle:        isMac ? 'hiddenInset' : 'default',
+        // Pin traffic lights so they don't shift on resize
+        trafficLightPosition: isMac ? { x: 12, y: 16 } : undefined,
         webPreferences: {
             preload:          path.join(__dirname, 'preload.js'),
             contextIsolation: true,
