@@ -83,9 +83,16 @@ button, input, a, .nav-item, .album-item, .photo-card, .photo-select {
 }
 .sidebar-header * { -webkit-app-region: no-drag; }
 
-/* macOS hiddenInset: push sidebar header and top-bar left below traffic lights */
-body.mac .sidebar-header {
-  padding-top: 44px;
+/* macOS hiddenInset: title must clear traffic lights (≈75px wide, ≈38px tall).
+   data-platform is set synchronously by an inline <script> in <head>
+   so this applies before the first paint — no flash. */
+html[data-platform="darwin"] .sidebar-header {
+  padding-top: 40px;
+  padding-left: 8px;
+}
+html[data-platform="darwin"] .app-title {
+  /* indent text past the ~75px button zone */
+  padding-left: 62px;
 }
 
 .app-title { font-size: 22px; font-weight: 700; color: var(--text-primary); letter-spacing: -0.5px; }

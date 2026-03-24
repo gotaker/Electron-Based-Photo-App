@@ -2,6 +2,14 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
+    <script>
+      // Runs synchronously before first paint — sets platform for CSS targeting.
+      try {
+        var _plt = (typeof process !== 'undefined' && process.platform)
+                   || (navigator.platform.toLowerCase().includes('mac') ? 'darwin' : 'other');
+        document.documentElement.setAttribute('data-platform', _plt);
+      } catch(e) {}
+    </script>
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
     <title>PhotoVault</title>
     <link rel="stylesheet" href="styles.css">
