@@ -294,6 +294,7 @@ function deletePhotoFiles(photoId, relativePath) {
 
 // Create the main application window
 function createWindow() {
+    win.setIcon(path.join(__dirname, 'icon.png'));
     mainWindow = new BrowserWindow({
         width: 1400,
         height: 900,
