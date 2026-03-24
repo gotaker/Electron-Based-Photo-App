@@ -6,7 +6,16 @@
 
 const { contextBridge, ipcRenderer } = require('electron');
 
+// Stamp body.mac immediately so CSS can clear the traffic-light zone
+// before any JS runs — avoids a visible layout jump on startup.
+if (process.platform === 'darwin') {
+    document.addEventListener('DOMContentLoaded', () => {
+        document.body.classList.add('mac');
+    });
+}
+
 contextBridge.exposeInMainWorld('electronAPI', {
+    platform: process.platform,
 
     // ── Photos ────────────────────────────────────────────────
     getPhotos:     ()               => ipcRenderer.invoke('get-photos'),
