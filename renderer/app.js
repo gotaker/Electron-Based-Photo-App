@@ -68,9 +68,12 @@ async function initApp() {
     await loadPhotos();
     await loadAlbums();
     autopurgeTrashed();
+    applyZoom();
+    updateGranularityControl();
     renderGallery();
     renderAlbums();
     updateCounts();
+    updateDateRange(photos);
 }
 
 async function loadPhotos() {
@@ -158,7 +161,7 @@ function photoCardHtml(photo) {
     const days = isDeleted ? daysRemaining(photo.deletedAt) : null;
 
     return `
-    <div class="photo-card ${sel ? 'is-selected' : ''} ${isDeleted ? 'is-deleted' : ''}"
+    <div class="photo-card ${sel ? 'is-selected' : ''} ${isDeleted ? 'is-deleted' : ''} ${metadataVisible ? 'show-meta' : ''}"
          data-photo-id="${escapeAttr(photo.id)}"
          onclick="${isDeleted ? '' : `openPhoto('${escapeJsString(photo.id)}')`}">
         <img src="${photo.src}" alt="${escapeAttr(photo.name)}" loading="lazy">
@@ -167,6 +170,10 @@ function photoCardHtml(photo) {
         ${photo.faces > 0 && !isDeleted ? `<div class="face-badge">👤 ${photo.faces} ${photo.faces===1?'person':'people'}</div>` : ''}
         ${photo.favorite && !isDeleted ? '<div class="fav-badge">♥</div>' : ''}
         ${isDeleted ? `<div class="days-badge">${days}d</div>` : ''}
+        <div class="photo-meta-overlay">
+            <div class="photo-meta-name">${escapeHtml(photo.name)}</div>
+            <div class="photo-meta-date">${escapeHtml(photo.date || '')}</div>
+        </div>
         <div class="photo-info">
             <div class="photo-name">${escapeHtml(photo.name)}</div>
             <div class="photo-date">${escapeHtml(photo.date || '')}</div>
@@ -199,6 +206,8 @@ function renderGallery() {
         gallery.style.display    = 'none';
         emptyState.style.display = 'none';
         updateUtilityBar();
+        updateGranularityControl();
+        updateDateRange([]);
         return;
     }
     uploadZone.style.display = 'none';
@@ -208,6 +217,8 @@ function renderGallery() {
         emptyState.style.display = 'flex';
         applyEmptyState(currentView);
         updateUtilityBar();
+        updateGranularityControl();
+        updateDateRange([]);
         return;
     }
 
@@ -215,7 +226,24 @@ function renderGallery() {
     emptyState.style.display = 'none';
 
     let list = filtered;
-    if (currentView === 'timeline') list = sortForTimeline(filtered);
+    if (currentView === 'timeline' || currentGranularity !== 'photos') {
+        list = sortForTimeline(filtered);
+    }
+
+    updateDateRange(filtered);
+    updateGranularityControl();
+
+    // Years / Months grouped views
+    if (currentGranularity === 'years') {
+        gallery.innerHTML = renderByYear(list);
+        updateToolbar();
+        return;
+    }
+    if (currentGranularity === 'months') {
+        gallery.innerHTML = renderByMonth(list);
+        updateToolbar();
+        return;
+    }
 
     const visible = list.slice(0, galleryVisibleCount);
     let html = '';
@@ -421,6 +449,7 @@ function switchView(view) {
         document.querySelector(`[data-view="${view}"]`)?.classList.add('active');
     updateViewTitle(view);
     selectedPhotos.clear();
+    updateGranularityControl();
     renderGallery();
     updateCounts();
 }
@@ -433,6 +462,7 @@ document.querySelectorAll('.nav-item').forEach(item => {
         galleryVisibleCount = 48;
         updateViewTitle(currentView);
         selectedPhotos.clear();
+        updateGranularityControl();
         renderGallery();
         updateCounts();
     });
@@ -527,9 +557,20 @@ function toggleSelect(id) {
     if (selectedPhotos.has(id)) selectedPhotos.delete(id);
     else selectedPhotos.add(id);
     renderGallery();
+    // Refresh info panel if open
+    if (infoPanelOpen && selectedPhotos.size > 0) {
+        populateInfoPanel(Array.from(selectedPhotos)[0]);
+    }
+    // Update toolbar favorite icon
+    updateToolbarFavIcon();
 }
 
-function clearSelection() { selectedPhotos.clear(); renderGallery(); updateToolbar(); }
+function clearSelection() {
+    selectedPhotos.clear();
+    renderGallery();
+    updateToolbar();
+    updateToolbarFavIcon();
+}
 
 function updateToolbar() {
     const tb      = document.getElementById('bottomToolbar');
@@ -744,9 +785,12 @@ async function exportPhoto() {
 }
 
 function setView(view, ev) {
-    document.querySelectorAll('.view-btn').forEach(b => b.classList.remove('active'));
-    (ev?.target || (typeof event!=='undefined'?event.target:null))?.classList.add('active');
+    if (ev?.target) {
+        document.querySelectorAll('.view-btn').forEach(b => b.classList.remove('active'));
+        ev.target.classList.add('active');
+    }
     document.getElementById('gallery').classList.toggle('list-view', view === 'list');
+    renderGallery();
 }
 
 // ── Counts ────────────────────────────────────────────────────
@@ -766,6 +810,15 @@ function updateCounts() {
     if (dupEl) dupEl.textContent = dupCount > 0 ? dupCount : '';
 }
 
+// ── Toolbar fav icon state ────────────────────────────────────
+function updateToolbarFavIcon() {
+    const ids = Array.from(selectedPhotos);
+    const allFav = ids.length > 0 && ids.every(id => photos.find(p => p.id === id)?.favorite);
+    const icon = document.getElementById('tbFavIcon');
+    if (icon) icon.querySelector('use').setAttribute('href', allFav ? '#ic-heart-fill' : '#ic-heart');
+    document.getElementById('tbFavBtn')?.classList.toggle('active', allFav);
+}
+
 // ── Sync ──────────────────────────────────────────────────────
 async function syncAzure() {
     const r = await window.electronAPI.syncAzureBlob({});
@@ -773,8 +826,365 @@ async function syncAzure() {
     alert(r.success ? `Uploaded ${r.uploaded} file(s) to "${r.container}".` : r.error || 'Sync failed');
 }
 
+// ── Zoom ──────────────────────────────────────────────────────
+const ZOOM_STEPS = [80, 110, 140, 180, 240, 320, 420];
+let zoomIndex = 3; // default 180px
+
+function applyZoom() {
+    document.documentElement.style.setProperty('--grid-col-size', ZOOM_STEPS[zoomIndex] + 'px');
+    document.getElementById('gallery')?.classList.toggle('list-view', false);
+}
+
+function zoomIn() {
+    if (zoomIndex < ZOOM_STEPS.length - 1) { zoomIndex++; applyZoom(); }
+}
+
+function zoomOut() {
+    if (zoomIndex > 0) { zoomIndex--; applyZoom(); }
+}
+
+// ── Granularity (Years / Months / All Photos) ─────────────────
+let currentGranularity = 'photos';
+
+function setGranularity(gran, ev) {
+    currentGranularity = gran;
+    document.querySelectorAll('.gran-btn').forEach(b => b.classList.remove('active'));
+    if (ev?.target) ev.target.classList.add('active');
+    else document.querySelector(`[data-gran="${gran}"]`)?.classList.add('active');
+    galleryVisibleCount = 48;
+    renderGallery();
+}
+
+// Update granularity control visibility (only for views that make sense)
+function updateGranularityControl() {
+    const showGran = ['all','timeline','recently-saved','imports','people'].includes(
+        typeof currentView === 'string' ? currentView : '__album__'
+    );
+    const ctrl = document.getElementById('granularityControl');
+    if (ctrl) ctrl.style.display = showGran ? 'flex' : 'none';
+}
+
+// ── Render grouped by year ────────────────────────────────────
+function renderByYear(list) {
+    const byYear = {};
+    list.forEach(p => {
+        const yr = new Date(p.captureDateISO || p.dateAdded || Date.now()).getFullYear();
+        (byYear[yr] = byYear[yr] || []).push(p);
+    });
+    const years = Object.keys(byYear).sort((a,b) => b - a);
+    let html = '';
+    years.forEach(yr => {
+        html += `<h2 class="year-heading" onclick="drillIntoYear(${yr})">${yr}</h2>`;
+        // Show up to first 6 photos per year as a preview
+        byYear[yr].slice(0, 6).forEach(p => { html += photoCardHtml(p); });
+    });
+    return html;
+}
+
+function renderByMonth(list) {
+    const byMonth = {};
+    list.forEach(p => {
+        const d = new Date(p.captureDateISO || p.dateAdded || Date.now());
+        const key = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
+        const label = d.toLocaleString('default', { month:'long', year:'numeric' });
+        byMonth[key] = byMonth[key] || { label, photos: [] };
+        byMonth[key].photos.push(p);
+    });
+    const keys = Object.keys(byMonth).sort((a,b) => b.localeCompare(a));
+    let html = '';
+    keys.forEach(k => {
+        html += `<h3 class="month-heading">${escapeHtml(byMonth[k].label)}</h3>`;
+        byMonth[k].photos.forEach(p => { html += photoCardHtml(p); });
+    });
+    return html;
+}
+
+function drillIntoYear(year) {
+    setGranularity('months', null);
+    searchQuery = String(year);
+    document.getElementById('searchInput').value = year;
+    renderGallery();
+}
+
+// ── Date range display ────────────────────────────────────────
+function updateDateRange(list) {
+    const el = document.getElementById('viewDateRange');
+    if (!el) return;
+    const active = (list || []).filter(p => !p.deleted && (p.captureDateISO || p.dateAdded));
+    if (active.length < 2) { el.textContent = ''; return; }
+    const dates = active.map(p => new Date(p.captureDateISO || p.dateAdded)).sort((a,b) => a-b);
+    const fmt = d => d.toLocaleDateString(undefined, { month:'short', day:'numeric', year:'numeric' });
+    el.textContent = `${fmt(dates[0])} – ${fmt(dates[dates.length-1])}`;
+}
+
+// ── Search toggle ─────────────────────────────────────────────
+let searchVisible = false;
+
+function toggleSearch() {
+    searchVisible = !searchVisible;
+    const bar = document.getElementById('inlineSearchBar');
+    const btn = document.getElementById('searchToggleBtn');
+    bar.style.display = searchVisible ? 'block' : 'none';
+    btn?.classList.toggle('active', searchVisible);
+    if (searchVisible) {
+        document.getElementById('searchInput')?.focus();
+    } else {
+        searchQuery = '';
+        if (document.getElementById('searchInput'))
+            document.getElementById('searchInput').value = '';
+        renderGallery();
+    }
+}
+
+// ── Metadata toggle (overlay captions on cards) ───────────────
+let metadataVisible = false;
+
+function toggleMetadata() {
+    metadataVisible = !metadataVisible;
+    document.getElementById('metaBtn')?.classList.toggle('active', metadataVisible);
+    document.getElementById('gallery').querySelectorAll('.photo-card').forEach(card => {
+        card.classList.toggle('show-meta', metadataVisible);
+    });
+    galleryVisibleCount = 48;
+    renderGallery(); // re-render so new cards get show-meta class
+}
+
+// ── More menu ─────────────────────────────────────────────────
+function toggleMoreMenu(ev) {
+    const menu = document.getElementById('moreMenu');
+    const isOpen = menu.style.display !== 'none';
+    menu.style.display = isOpen ? 'none' : 'block';
+    if (!isOpen) {
+        // Close on outside click
+        setTimeout(() => document.addEventListener('click', closeMoreMenuOutside, { once: true }), 0);
+    }
+    ev?.stopPropagation();
+}
+
+function closeMoreMenuOutside() {
+    closeMoreMenu();
+}
+
+function closeMoreMenu() {
+    const menu = document.getElementById('moreMenu');
+    if (menu) menu.style.display = 'none';
+}
+
+function selectAllPhotos() {
+    getFilteredPhotos().forEach(p => selectedPhotos.add(p.id));
+    renderGallery();
+}
+
+// ── Info Panel ────────────────────────────────────────────────
+let infoPanelOpen = false;
+let infoPanelPhotoId = null;
+
+function toggleInfoPanel() {
+    infoPanelOpen = !infoPanelOpen;
+    const panel = document.getElementById('infoPanel');
+    const btn   = document.getElementById('infoBtn');
+    panel.style.display = infoPanelOpen ? 'flex' : 'none';
+    btn?.classList.toggle('active', infoPanelOpen);
+
+    if (infoPanelOpen) {
+        // Show info for the first selected photo, or last viewed
+        const id = selectedPhotos.size > 0
+            ? Array.from(selectedPhotos)[0]
+            : (recentlyViewedIds[0] || null);
+        if (id) populateInfoPanel(id);
+    }
+}
+
+async function populateInfoPanel(photoId) {
+    infoPanelPhotoId = photoId;
+    const photo = photos.find(p => p.id === photoId);
+    if (!photo) return;
+
+    const body = document.getElementById('infoPanelBody');
+    body.innerHTML = `
+        <div class="info-thumb-wrap">
+            <img src="${photo.src || ''}" alt="${escapeAttr(photo.name)}">
+        </div>
+        <div class="info-row">
+            <span class="info-label">Filename</span>
+            <span class="info-value">${escapeHtml(photo.name)}</span>
+        </div>
+        ${photo.date ? `<div class="info-row">
+            <span class="info-label">Date</span>
+            <span class="info-value">${escapeHtml(photo.date)}</span>
+        </div>` : ''}
+        ${photo.captureDateISO ? `<div class="info-row">
+            <span class="info-label">Captured</span>
+            <span class="info-value">${escapeHtml(new Date(photo.captureDateISO).toLocaleString())}</span>
+        </div>` : ''}
+        <div class="info-separator"></div>
+        ${photo.cameraMake ? `<div class="info-row">
+            <span class="info-label">Camera</span>
+            <span class="info-value">${escapeHtml(photo.cameraMake)}${photo.cameraModel ? ' ' + escapeHtml(photo.cameraModel) : ''}</span>
+        </div>` : ''}
+        ${photo.fileSize ? `<div class="info-row">
+            <span class="info-label">File Size</span>
+            <span class="info-value">${(photo.fileSize / (1024*1024)).toFixed(2)} MB</span>
+        </div>` : ''}
+        ${photo.faces > 0 ? `<div class="info-row">
+            <span class="info-label">People</span>
+            <span class="info-value">${photo.faces} ${photo.faces === 1 ? 'person' : 'people'}</span>
+        </div>` : ''}
+        <div class="info-separator"></div>
+        <div class="info-row">
+            <span class="info-label">Status</span>
+            <span class="info-value">${photo.favorite ? '♥ Favorite' : 'Not favorited'}</span>
+        </div>
+        ${photo.editedAt ? `<div class="info-row">
+            <span class="info-label">Last Edited</span>
+            <span class="info-value">${escapeHtml(new Date(photo.editedAt).toLocaleString())}</span>
+        </div>` : ''}
+    `;
+}
+
+// ── Share selected ────────────────────────────────────────────
+async function shareSelected() {
+    const ids = selectedPhotos.size > 0
+        ? Array.from(selectedPhotos)
+        : (recentlyViewedIds[0] ? [recentlyViewedIds[0]] : []);
+    if (ids.length === 0) { alert('Select a photo to share.'); return; }
+    for (const id of ids) {
+        const p = photos.find(x => x.id === id);
+        if (!p) continue;
+        const r = await window.electronAPI.exportPhoto(id, p.name);
+        if (r.success && !recentlySharedIds.includes(id)) recentlySharedIds.unshift(id);
+    }
+    alert(`Exported ${ids.length} photo${ids.length > 1 ? 's' : ''} successfully.`);
+}
+
+// ── Favorite selected (toolbar heart) ────────────────────────
+async function favoriteSelected() {
+    const ids = selectedPhotos.size > 0
+        ? Array.from(selectedPhotos)
+        : (recentlyViewedIds[0] ? [recentlyViewedIds[0]] : []);
+    if (ids.length === 0) return;
+
+    const allFav = ids.every(id => photos.find(p => p.id === id)?.favorite);
+    const newFav = !allFav;
+
+    for (const id of ids) {
+        const p = photos.find(x => x.id === id);
+        if (!p) continue;
+        p.favorite = newFav;
+        await window.electronAPI.updatePhoto(id, { favorite: newFav });
+    }
+
+    // Update toolbar heart icon
+    const icon = document.getElementById('tbFavIcon');
+    if (icon) icon.querySelector('use').setAttribute('href', newFav ? '#ic-heart-fill' : '#ic-heart');
+    const btn = document.getElementById('tbFavBtn');
+    btn?.classList.toggle('active', newFav);
+
+    renderGallery(); updateCounts();
+}
+
+// ── Duplicate selected ────────────────────────────────────────
+async function duplicateSelected() {
+    const ids = selectedPhotos.size > 0
+        ? Array.from(selectedPhotos)
+        : (recentlyViewedIds[0] ? [recentlyViewedIds[0]] : []);
+    if (ids.length === 0) { alert('Select a photo to duplicate.'); return; }
+
+    for (const id of ids) {
+        const orig = photos.find(p => p.id === id);
+        if (!orig) continue;
+        const dup = {
+            ...orig,
+            id: crypto.randomUUID ? crypto.randomUUID() : Date.now() + Math.random().toString(36),
+            name: orig.name.replace(/(\.[^.]+)$/, ' copy$1'),
+            dateAdded: new Date().toISOString(),
+            favorite: false, editedAt: null, deleted: false, deletedAt: null
+        };
+        const r = await window.electronAPI.savePhoto(dup);
+        if (r.success) { photos.push({ ...dup, src: orig.src }); lastImportBatch.push(dup.id); }
+    }
+    renderGallery(); updateCounts();
+}
+
+// ── Slideshow ─────────────────────────────────────────────────
+let ssPhotos = [];
+let ssIndex  = 0;
+let ssTimer  = null;
+let ssPlaying = true;
+const SS_INTERVAL = 3500;
+
+function startSlideshow() {
+    ssPhotos = getFilteredPhotos().filter(p => p.src);
+    if (ssPhotos.length === 0) { alert('No photos to show.'); return; }
+    ssIndex = 0; ssPlaying = true;
+    document.getElementById('slideshowOverlay').style.display = 'flex';
+    renderSlideshowFrame();
+    ssTimer = setInterval(slideshowTick, SS_INTERVAL);
+}
+
+function stopSlideshow() {
+    clearInterval(ssTimer); ssTimer = null;
+    document.getElementById('slideshowOverlay').style.display = 'none';
+}
+
+function renderSlideshowFrame() {
+    const p = ssPhotos[ssIndex];
+    if (!p) return;
+    const img = document.getElementById('slideshowImg');
+    img.style.opacity = '0';
+    img.src = p.src;
+    img.onload = () => { img.style.opacity = '1'; };
+    document.getElementById('slideshowCaption').textContent = `${p.name}  ·  ${p.date || ''}`.trim().replace(/·\s*$/, '');
+    // Dots (max 10 shown)
+    const dotsEl = document.getElementById('slideshowDots');
+    if (ssPhotos.length <= 20) {
+        dotsEl.innerHTML = ssPhotos.map((_, i) =>
+            `<div class="slideshow-dot ${i === ssIndex ? 'active' : ''}"></div>`
+        ).join('');
+    } else {
+        dotsEl.innerHTML = `<span style="color:rgba(255,255,255,0.5);font-size:12px">${ssIndex+1} / ${ssPhotos.length}</span>`;
+    }
+    // Play icon
+    const icon = document.getElementById('ssPlayIcon');
+    if (icon) {
+        icon.innerHTML = ssPlaying
+            ? `<rect x="6" y="4" width="4" height="16" rx="1"/><rect x="14" y="4" width="4" height="16" rx="1"/>`
+            : `<polygon points="5,3 19,12 5,21"/>`;
+    }
+}
+
+function slideshowTick() {
+    ssIndex = (ssIndex + 1) % ssPhotos.length;
+    renderSlideshowFrame();
+}
+
+function slideshowStep(dir) {
+    clearInterval(ssTimer);
+    ssIndex = (ssIndex + dir + ssPhotos.length) % ssPhotos.length;
+    renderSlideshowFrame();
+    if (ssPlaying) ssTimer = setInterval(slideshowTick, SS_INTERVAL);
+}
+
+function toggleSlideshowPlay() {
+    ssPlaying = !ssPlaying;
+    if (ssPlaying) {
+        ssTimer = setInterval(slideshowTick, SS_INTERVAL);
+    } else {
+        clearInterval(ssTimer); ssTimer = null;
+    }
+    renderSlideshowFrame();
+}
+
 // ── Keyboard shortcuts ────────────────────────────────────────
 document.addEventListener('keydown', e => {
+    // Slideshow shortcuts
+    if (document.getElementById('slideshowOverlay')?.style.display !== 'none') {
+        if (e.key === 'Escape')     { stopSlideshow(); return; }
+        if (e.key === 'ArrowRight') { slideshowStep(1); return; }
+        if (e.key === 'ArrowLeft')  { slideshowStep(-1); return; }
+        if (e.key === ' ')          { e.preventDefault(); toggleSlideshowPlay(); return; }
+    }
+
     const modal = document.getElementById('photoModal');
     if (modal.classList.contains('active')) {
         if (e.key === 'Escape')      closeModal({ target: modal });
@@ -783,11 +1193,14 @@ document.addEventListener('keydown', e => {
         if (e.key === 'f' || e.key === 'F') toggleFavorite();
     }
     if (e.key === 'Delete' && selectedPhotos.size > 0) deleteSelected();
-    if (e.key === 'Escape' && selectedPhotos.size > 0) clearSelection();
+    if (e.key === 'Escape') { clearSelection(); closeMoreMenu(); }
     if ((e.ctrlKey || e.metaKey) && e.key === 'a') {
         e.preventDefault();
         getFilteredPhotos().forEach(p => selectedPhotos.add(p.id));
         renderGallery();
+    }
+    if ((e.ctrlKey || e.metaKey) && e.key === 'f') {
+        e.preventDefault(); toggleSearch();
     }
 });
 

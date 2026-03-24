@@ -220,6 +220,52 @@
     <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/>
     <circle cx="12" cy="10" r="3"/>
   </symbol>
+
+  <!-- minus (zoom out) -->
+  <symbol id="ic-minus" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round">
+    <line x1="5" y1="12" x2="19" y2="12"/>
+  </symbol>
+
+  <!-- play.rectangle (slideshow) -->
+  <symbol id="ic-slideshow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round">
+    <rect x="2" y="4" width="20" height="14" rx="2.5"/>
+    <polygon points="10,9 10,15 15,12" fill="currentColor" stroke="none"/>
+    <line x1="8" y1="21" x2="16" y2="21"/>
+    <line x1="12" y1="18" x2="12" y2="21"/>
+  </symbol>
+
+  <!-- text.alignleft (metadata toggle) -->
+  <symbol id="ic-text-lines" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round">
+    <line x1="3"  y1="6"  x2="21" y2="6"/>
+    <line x1="3"  y1="10" x2="21" y2="10"/>
+    <line x1="3"  y1="14" x2="21" y2="14"/>
+    <line x1="3"  y1="18" x2="15" y2="18"/>
+  </symbol>
+
+  <!-- ellipsis (more) -->
+  <symbol id="ic-ellipsis" viewBox="0 0 24 24" fill="currentColor" stroke="none">
+    <circle cx="5"  cy="12" r="1.75"/>
+    <circle cx="12" cy="12" r="1.75"/>
+    <circle cx="19" cy="12" r="1.75"/>
+  </symbol>
+
+  <!-- info.circle -->
+  <symbol id="ic-info" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round">
+    <circle cx="12" cy="12" r="9.5"/>
+    <line x1="12" y1="11" x2="12" y2="17"/>
+    <circle cx="12" cy="7.5" r="0.75" fill="currentColor" stroke="none"/>
+  </symbol>
+
+  <!-- square.on.square (duplicate) -->
+  <symbol id="ic-sq-on-sq" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round">
+    <rect x="9" y="9" width="11" height="11" rx="2"/>
+    <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
+  </symbol>
+
+  <!-- xmark.circle.fill (close slideshow) -->
+  <symbol id="ic-xmark-circle" viewBox="0 0 24 24" fill="currentColor" stroke="none">
+    <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm4.95 13.54-1.41 1.41L12 13.41l-3.54 3.54-1.41-1.41L10.59 12 7.05 8.46l1.41-1.41L12 10.59l3.54-3.54 1.41 1.41L13.41 12l3.54 3.54z"/>
+  </symbol>
 </svg>
 
 
@@ -229,10 +275,10 @@
         <div class="sidebar-header">
             <h1 class="app-title">Photos</h1>
         </div>
-        <div class="sidebar-search">
+        <div class="sidebar-search" style="display:none">
             <div class="search-wrapper">
                 <svg class="search-icon" aria-hidden="true"><use href="#ic-search"/></svg>
-                <input type="text" id="searchInput" placeholder="Search" oninput="filterPhotos()">
+                <input type="text" placeholder="Search">
             </div>
         </div>
         <nav class="sidebar-nav">
@@ -337,20 +383,94 @@
 
     <div class="main-content">
         <div class="top-bar">
+            <!-- Left: title + date range -->
             <div class="top-bar-left">
-                <h2 class="view-title" id="viewTitle">All Photos</h2>
+                <div class="top-bar-title-group">
+                    <h2 class="view-title" id="viewTitle">All Photos</h2>
+                    <span class="view-date-range" id="viewDateRange"></span>
+                </div>
             </div>
-            <div class="top-bar-right">
-                <div class="view-toggle">
-                    <button class="view-btn active" onclick="setView('grid',event)" title="Grid">
-                        <svg class="btn-icon"><use href="#ic-grid"/></svg>
+
+            <!-- Center: zoom + granularity -->
+            <div class="top-bar-center">
+                <div class="zoom-controls">
+                    <button class="zoom-btn" onclick="zoomOut()" title="Zoom out">
+                        <svg class="zoom-icon"><use href="#ic-minus"/></svg>
                     </button>
-                    <button class="view-btn" onclick="setView('list',event)" title="List">
-                        <svg class="btn-icon"><use href="#ic-list"/></svg>
+                    <div class="zoom-divider"></div>
+                    <button class="zoom-btn" onclick="zoomIn()" title="Zoom in">
+                        <svg class="zoom-icon"><use href="#ic-plus"/></svg>
                     </button>
                 </div>
-                <button class="import-btn" onclick="importPhotos()" title="Import Photos" id="importBtn">
-                    <svg class="btn-icon-plus"><use href="#ic-plus"/></svg>
+                <div class="granularity-control" id="granularityControl">
+                    <button class="gran-btn" data-gran="years"  onclick="setGranularity('years',event)">Years</button>
+                    <button class="gran-btn" data-gran="months" onclick="setGranularity('months',event)">Months</button>
+                    <button class="gran-btn active" data-gran="photos" onclick="setGranularity('photos',event)">All Photos</button>
+                </div>
+            </div>
+
+            <!-- Right: tools + actions -->
+            <div class="top-bar-right">
+                <div class="tool-group">
+                    <button class="tool-btn" onclick="startSlideshow()" title="Slideshow">
+                        <svg class="tool-icon"><use href="#ic-slideshow"/></svg>
+                    </button>
+                    <button class="tool-btn" onclick="toggleMetadata()" title="Show details" id="metaBtn">
+                        <svg class="tool-icon"><use href="#ic-text-lines"/></svg>
+                    </button>
+                    <div class="more-menu-wrap">
+                        <button class="tool-btn" onclick="toggleMoreMenu(event)" title="More" id="moreBtn">
+                            <svg class="tool-icon"><use href="#ic-ellipsis"/></svg>
+                        </button>
+                        <div class="more-menu" id="moreMenu" style="display:none">
+                            <button class="more-menu-item" onclick="selectAllPhotos();closeMoreMenu()">Select All</button>
+                            <button class="more-menu-item" onclick="clearSelection();closeMoreMenu()">Deselect All</button>
+                            <div class="more-menu-separator"></div>
+                            <button class="more-menu-item" onclick="setView('grid',null);closeMoreMenu()">Grid View</button>
+                            <button class="more-menu-item" onclick="setView('list',null);closeMoreMenu()">List View</button>
+                            <div class="more-menu-separator"></div>
+                            <button class="more-menu-item" onclick="importPhotos();closeMoreMenu()">Import Photos…</button>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="top-bar-divider"></div>
+
+                <div class="tool-group">
+                    <button class="tool-btn" onclick="toggleInfoPanel()" title="Info" id="infoBtn">
+                        <svg class="tool-icon"><use href="#ic-info"/></svg>
+                    </button>
+                    <button class="tool-btn" onclick="shareSelected()" title="Share">
+                        <svg class="tool-icon"><use href="#ic-share"/></svg>
+                    </button>
+                    <button class="tool-btn" onclick="favoriteSelected()" title="Favorite" id="tbFavBtn">
+                        <svg class="tool-icon" id="tbFavIcon"><use href="#ic-heart"/></svg>
+                    </button>
+                    <button class="tool-btn" onclick="duplicateSelected()" title="Duplicate">
+                        <svg class="tool-icon"><use href="#ic-sq-on-sq"/></svg>
+                    </button>
+                </div>
+
+                <div class="top-bar-divider"></div>
+
+                <div class="tool-group">
+                    <button class="tool-btn" onclick="toggleSearch()" title="Search" id="searchToggleBtn">
+                        <svg class="tool-icon"><use href="#ic-search"/></svg>
+                    </button>
+                    <button class="import-btn" onclick="importPhotos()" title="Import Photos">
+                        <svg class="btn-icon-plus"><use href="#ic-plus"/></svg>
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Inline search bar -->
+        <div class="inline-search-bar" id="inlineSearchBar" style="display:none">
+            <div class="inline-search-wrapper">
+                <svg class="search-icon"><use href="#ic-search"/></svg>
+                <input type="text" id="searchInput" placeholder="Search photos…" oninput="filterPhotos()">
+                <button class="inline-search-close" onclick="toggleSearch()">
+                    <svg class="close-icon"><use href="#ic-xmark"/></svg>
                 </button>
             </div>
         </div>
@@ -492,6 +612,42 @@
         </div>
         <div class="modal-body"><div id="albumSelectList"></div></div>
     </div>
+</div>
+
+<!-- ── Info Panel ── -->
+<div class="info-panel" id="infoPanel" style="display:none">
+    <div class="info-panel-header">
+        <span class="info-panel-title">Info</span>
+        <button class="close-btn" onclick="toggleInfoPanel()">
+            <svg class="close-icon"><use href="#ic-xmark"/></svg>
+        </button>
+    </div>
+    <div class="info-panel-body" id="infoPanelBody">
+        <div class="info-empty">Select a photo to see its details</div>
+    </div>
+</div>
+
+<!-- ── Slideshow Overlay ── -->
+<div class="slideshow-overlay" id="slideshowOverlay" style="display:none">
+    <button class="slideshow-close" onclick="stopSlideshow()">
+        <svg style="width:26px;height:26px;display:block;color:rgba(255,255,255,0.8)" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+    </button>
+    <button class="slideshow-nav slideshow-prev" onclick="slideshowStep(-1)">
+        <svg style="width:22px;height:22px;display:block;color:white" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
+    </button>
+    <img class="slideshow-img" id="slideshowImg" src="" alt="">
+    <div class="slideshow-bottom">
+        <div class="slideshow-caption" id="slideshowCaption"></div>
+        <div class="slideshow-dots" id="slideshowDots"></div>
+    </div>
+    <button class="slideshow-nav slideshow-next" onclick="slideshowStep(1)">
+        <svg style="width:22px;height:22px;display:block;color:white" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
+    </button>
+    <button class="slideshow-play-btn" id="slideshowPlayBtn" onclick="toggleSlideshowPlay()">
+        <svg id="ssPlayIcon" style="width:16px;height:16px;display:block;color:white" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <polygon points="5,3 19,12 5,21"/>
+        </svg>
+    </button>
 </div>
 
 <script src="app.js"></script>
