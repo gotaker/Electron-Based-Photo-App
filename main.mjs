@@ -4,23 +4,25 @@
  *           EXIF reading, Azure Blob, Google Photos OAuth, Apple Photos sync
  */
 
-import { app, BrowserWindow, ipcMain, dialog, shell, net } from 'electron';
-import path  from 'path';
-import fs    from 'fs';
-import { fileURLToPath } from 'url';
-import { createRequire } from 'module';
+import { app, BrowserWindow, ipcMain, dialog, shell } from 'electron';
+import path   from 'path';
+import fs     from 'fs';
 import crypto from 'crypto';
 import http   from 'http';
-import { exec } from 'child_process';
-import { promisify } from 'util';
+import { fileURLToPath } from 'url';
+import { createRequire }  from 'module';
+import { exec }           from 'child_process';
+import { promisify }      from 'util';
+// electron-store v10+ is pure ESM — import directly, NOT via require()
+import Store from 'electron-store';
 
 const execAsync  = promisify(exec);
 const __filename = fileURLToPath(import.meta.url);
 const __dirname  = path.dirname(__filename);
-const require    = createRequire(import.meta.url);
+// sharp and exifr ship CJS builds — safe to load via createRequire
+const require = createRequire(import.meta.url);
 
 // ── Third-party deps ─────────────────────────────────────────
-const Store  = require('electron-store');
 const sharp  = require('sharp');
 const exifr  = require('exifr');
 
