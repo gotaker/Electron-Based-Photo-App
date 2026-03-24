@@ -266,6 +266,37 @@
   <symbol id="ic-xmark-circle" viewBox="0 0 24 24" fill="currentColor" stroke="none">
     <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm4.95 13.54-1.41 1.41L12 13.41l-3.54 3.54-1.41-1.41L10.59 12 7.05 8.46l1.41-1.41L12 10.59l3.54-3.54 1.41 1.41L13.41 12l3.54 3.54z"/>
   </symbol>
+  <!-- Google G -->
+  <symbol id="ic-google" viewBox="0 0 24 24" fill="currentColor" stroke="none">
+    <path d="M21.35 11.1H12.18v2.73h6.51c-.33 3.81-3.5 5.44-6.5 5.44C8.36 19.27 5 16.25 5 12c0-4.1 3.2-7.27 7.19-7.27 3.1 0 4.91 1.97 4.91 1.97L19 4.72S16.56 2 12.1 2C6.42 2 2.03 6.8 2.03 12c0 5.05 4.13 10 10.22 10 5.35 0 9.25-3.67 9.25-9.09 0-1.15-.15-1.81-.15-1.81z"/>
+  </symbol>
+  <!-- Apple logo -->
+  <symbol id="ic-apple" viewBox="0 0 24 24" fill="currentColor" stroke="none">
+    <path d="M18.71 19.5c-.83 1.24-1.71 2.45-3.05 2.47-1.34.03-1.77-.79-3.29-.79-1.53 0-2 .77-3.27.82-1.31.05-2.3-1.32-3.14-2.53C4.25 17 2.94 12.45 4.7 9.39c.87-1.52 2.43-2.48 4.12-2.51 1.28-.02 2.5.87 3.29.87s2.27-1.07 3.82-.91c.65.03 2.47.26 3.64 1.98-.09.06-2.17 1.28-2.15 3.81.03 3.02 2.65 4.03 2.68 4.04-.03.07-.42 1.44-1.39 2.83zM13 3.5c.73-.83 1.94-1.46 2.94-1.5.13 1.17-.34 2.35-1.04 3.19-.69.85-1.83 1.51-2.95 1.42-.15-1.15.41-2.35 1.05-3.11z"/>
+  </symbol>
+  <!-- arrow.2.circlepath -->
+  <symbol id="ic-sync-arrows" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round">
+    <polyline points="1 4 1 10 7 10"/>
+    <polyline points="23 20 23 14 17 14"/>
+    <path d="M20.49 9A9 9 0 0 0 5.64 5.64L1 10m22 4-4.64 4.36A9 9 0 0 1 3.51 15"/>
+  </symbol>
+  <!-- checkmark.circle -->
+  <symbol id="ic-check-circle" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round">
+    <circle cx="12" cy="12" r="9.5"/>
+    <polyline points="7 12.5 10.5 16 17 9"/>
+  </symbol>
+  <!-- exclamationmark.circle -->
+  <symbol id="ic-warning-circle" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round">
+    <circle cx="12" cy="12" r="9.5"/>
+    <line x1="12" y1="8" x2="12" y2="13"/>
+    <circle cx="12" cy="16.5" r="0.8" fill="currentColor" stroke="none"/>
+  </symbol>
+  <!-- icloud.and.arrow.down -->
+  <symbol id="ic-cloud-down" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round">
+    <polyline points="8 17 12 21 16 17"/>
+    <line x1="12" y1="12" x2="12" y2="21"/>
+    <path d="M20.88 18.09A5 5 0 0 0 18 9h-1.26A8 8 0 1 0 3 16.29"/>
+  </symbol>
 </svg>
 
 
@@ -373,11 +404,27 @@
 
         </nav>
         <div class="sidebar-footer">
-            <span><span id="photoCount">0</span> Photos</span>
-            <button class="sync-btn" onclick="syncAzure()">
-                <svg class="btn-icon-sm"><use href="#ic-cloud-up"/></svg>
-                Sync
-            </button>
+            <div class="sidebar-footer-top">
+                <span class="footer-photo-count"><span id="photoCount">0</span> Photos</span>
+                <button class="sync-open-btn" id="syncOpenBtn" onclick="openSyncModal()">
+                    <svg class="btn-icon-sm"><use href="#ic-sync-arrows"/></svg>
+                    <span id="syncBtnLabel">Sync</span>
+                </button>
+            </div>
+            <div class="sync-status-row" id="syncStatusRow" style="display:none">
+                <div class="sync-pill" id="syncPillGoogle" style="display:none">
+                    <svg style="width:10px;height:10px"><use href="#ic-google"/></svg>
+                    <span id="syncPillGoogleLabel">Google</span>
+                </div>
+                <div class="sync-pill" id="syncPillApple" style="display:none">
+                    <svg style="width:10px;height:10px"><use href="#ic-apple"/></svg>
+                    <span id="syncPillAppleLabel">Apple</span>
+                </div>
+            </div>
+            <div class="sync-progress-wrap" id="syncProgressWrap" style="display:none">
+                <div class="sync-progress-track"><div class="sync-progress-bar" id="syncProgressBar"></div></div>
+                <span class="sync-progress-label" id="syncProgressLabel">Syncing…</span>
+            </div>
         </div>
     </div>
 
@@ -648,6 +695,165 @@
             <polygon points="5,3 19,12 5,21"/>
         </svg>
     </button>
+</div>
+
+<!-- ═══════════════════════════════════════════
+     SYNC MODAL
+═══════════════════════════════════════════ -->
+<div class="modal" id="syncModal" onclick="closeSyncModalOutside(event)">
+<div class="sync-sheet" onclick="event.stopPropagation()">
+
+  <!-- Header -->
+  <div class="sync-sheet-header">
+    <h2 class="sync-sheet-title">Sync</h2>
+    <button class="close-btn" onclick="closeSyncModal()">
+      <svg class="close-icon"><use href="#ic-xmark"/></svg>
+    </button>
+  </div>
+
+  <!-- Google Photos card -->
+  <div class="sync-svc-card" id="googleCard">
+    <div class="sync-svc-row">
+      <div class="sync-svc-logo google-logo">
+        <svg style="width:20px;height:20px"><use href="#ic-google"/></svg>
+      </div>
+      <div class="sync-svc-info">
+        <div class="sync-svc-name">Google Photos</div>
+        <div class="sync-svc-sub" id="googleStatus">Not connected</div>
+      </div>
+      <div class="sync-svc-actions">
+        <span class="sync-badge" id="googleBadge" style="display:none"></span>
+        <button class="sync-connect-btn" id="googleConnectBtn" onclick="connectGoogle()">Connect</button>
+      </div>
+    </div>
+    <div class="sync-svc-detail" id="googleDetail" style="display:none">
+      <div class="sync-detail-row"><span>Account</span><span id="googleAccount">—</span></div>
+      <div class="sync-detail-row"><span>Last synced</span><span id="googleLastSync">Never</span></div>
+      <div class="sync-detail-row"><span>Photos in library</span><span id="googlePhotoCount">—</span></div>
+    </div>
+  </div>
+
+  <!-- Apple Photos card -->
+  <div class="sync-svc-card" id="appleCard">
+    <div class="sync-svc-row">
+      <div class="sync-svc-logo apple-logo">
+        <svg style="width:18px;height:18px"><use href="#ic-apple"/></svg>
+      </div>
+      <div class="sync-svc-info">
+        <div class="sync-svc-name">Apple Photos</div>
+        <div class="sync-svc-sub" id="appleStatus">Not connected</div>
+      </div>
+      <div class="sync-svc-actions">
+        <span class="sync-badge" id="appleBadge" style="display:none"></span>
+        <button class="sync-connect-btn" id="appleConnectBtn" onclick="connectApple()">Connect</button>
+      </div>
+    </div>
+    <div class="sync-svc-detail" id="appleDetail" style="display:none">
+      <div class="sync-detail-row"><span>Library</span><span id="appleLibraryName">System Photos Library</span></div>
+      <div class="sync-detail-row"><span>Last synced</span><span id="appleLastSync">Never</span></div>
+      <div class="sync-detail-row"><span>Photos in library</span><span id="applePhotoCount">—</span></div>
+    </div>
+    <div class="sync-platform-note" id="applePlatformNote" style="display:none">
+      <svg style="width:12px;height:12px;flex-shrink:0" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9.5"/><line x1="12" y1="8" x2="12" y2="13"/><circle cx="12" cy="16.5" r=".8" fill="currentColor" stroke="none"/></svg>
+      Apple Photos sync is available on macOS only
+    </div>
+  </div>
+
+  <!-- Direction + options (shown once at least one service connected) -->
+  <div class="sync-options-wrap" id="syncOptionsWrap" style="display:none">
+    <div class="sync-section-title">Sync Direction</div>
+    <div class="sync-dir-grid">
+      <label class="sync-dir-opt"><input type="radio" name="syncDir" value="download" id="dirDownload">
+        <div class="sync-dir-card">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round" style="width:22px;height:22px;display:block;margin:0 auto 6px"><polyline points="8 17 12 21 16 17"/><line x1="12" y1="12" x2="12" y2="21"/><path d="M20.88 18.09A5 5 0 0 0 18 9h-1.26A8 8 0 1 0 3 16.29"/></svg>
+          <div class="sync-dir-label">Download only</div>
+          <div class="sync-dir-sub">Import from cloud</div>
+        </div>
+      </label>
+      <label class="sync-dir-opt"><input type="radio" name="syncDir" value="bidirectional" id="dirBidi" checked>
+        <div class="sync-dir-card">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round" style="width:22px;height:22px;display:block;margin:0 auto 6px"><polyline points="1 4 1 10 7 10"/><polyline points="23 20 23 14 17 14"/><path d="M20.49 9A9 9 0 0 0 5.64 5.64L1 10m22 4-4.64 4.36A9 9 0 0 1 3.51 15"/></svg>
+          <div class="sync-dir-label">Bidirectional</div>
+          <div class="sync-dir-sub">Keep both in sync</div>
+        </div>
+      </label>
+      <label class="sync-dir-opt"><input type="radio" name="syncDir" value="upload" id="dirUpload">
+        <div class="sync-dir-card">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round" style="width:22px;height:22px;display:block;margin:0 auto 6px"><polyline points="16 13 12 9 8 13"/><line x1="12" y1="9" x2="12" y2="21"/><path d="M20.88 18.09A5 5 0 0 0 18 9h-1.26A8 8 0 1 0 3 16.29"/></svg>
+          <div class="sync-dir-label">Upload only</div>
+          <div class="sync-dir-sub">Back up to cloud</div>
+        </div>
+      </label>
+    </div>
+
+    <div class="sync-auto-row">
+      <div>
+        <div class="sync-auto-label">Auto-sync</div>
+        <div class="sync-auto-sub">Sync automatically while app is open</div>
+      </div>
+      <button class="sync-toggle" id="autoSyncToggle" onclick="toggleAutoSync()" role="switch" aria-checked="false">
+        <div class="sync-toggle-thumb"></div>
+      </button>
+    </div>
+  </div>
+
+  <!-- Activity log -->
+  <div class="sync-log-wrap" id="syncLogWrap" style="display:none">
+    <div class="sync-section-title">Recent Activity</div>
+    <div class="sync-log" id="syncLog"></div>
+  </div>
+
+  <!-- Footer -->
+  <div class="sync-sheet-footer">
+    <span class="sync-last-run" id="syncLastRun">Last sync: Never</span>
+    <div style="display:flex;gap:8px">
+      <button class="btn-secondary-editor" onclick="closeSyncModal()">Close</button>
+      <button class="btn-primary" id="syncNowBtn" onclick="runSync()" disabled>
+        <svg style="width:13px;height:13px" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><polyline points="1 4 1 10 7 10"/><polyline points="23 20 23 14 17 14"/><path d="M20.49 9A9 9 0 0 0 5.64 5.64L1 10m22 4-4.64 4.36A9 9 0 0 1 3.51 15"/></svg>
+        Sync Now
+      </button>
+    </div>
+  </div>
+
+</div>
+</div>
+
+<!-- ═══════════════════════════════════════════
+     GOOGLE OAUTH SETUP MODAL
+═══════════════════════════════════════════ -->
+<div class="modal" id="oauthModal" onclick="if(event.target===this)closeOAuthModal()">
+<div class="sync-sheet" style="max-width:440px" onclick="event.stopPropagation()">
+  <div class="sync-sheet-header">
+    <h2 class="sync-sheet-title">Google Photos Setup</h2>
+    <button class="close-btn" onclick="closeOAuthModal()"><svg class="close-icon"><use href="#ic-xmark"/></svg></button>
+  </div>
+  <div style="padding:0 20px 20px;font-size:13.5px;color:var(--text-secondary);line-height:1.65">
+    <p style="margin-bottom:14px">To connect Google Photos you need a free OAuth 2.0 client ID from Google Cloud.</p>
+    <ol style="padding-left:18px;margin:0;display:flex;flex-direction:column;gap:8px">
+      <li>Go to <strong style="color:var(--text-primary)">console.cloud.google.com</strong> → APIs &amp; Services → Credentials</li>
+      <li>Create an <strong style="color:var(--text-primary)">OAuth 2.0 Client ID</strong> (Desktop app)</li>
+      <li>Enable the <strong style="color:var(--text-primary)">Google Photos Library API</strong></li>
+      <li>Paste your credentials below</li>
+    </ol>
+    <div style="margin-top:18px;display:flex;flex-direction:column;gap:12px">
+      <div>
+        <div class="sync-input-label">Client ID</div>
+        <input id="oauthClientId" type="text" placeholder="xxxx.apps.googleusercontent.com" class="sync-text-input" oninput="validateOAuth()">
+      </div>
+      <div>
+        <div class="sync-input-label">Client Secret</div>
+        <input id="oauthClientSecret" type="password" placeholder="GOCSPX-…" class="sync-text-input" oninput="validateOAuth()">
+      </div>
+    </div>
+  </div>
+  <div class="sync-sheet-footer">
+    <span></span>
+    <div style="display:flex;gap:8px">
+      <button class="btn-secondary-editor" onclick="closeOAuthModal()">Cancel</button>
+      <button class="btn-primary" id="oauthSaveBtn" onclick="saveOAuthAndConnect()" disabled>Continue</button>
+    </div>
+  </div>
+</div>
 </div>
 
 <script src="app.js"></script>

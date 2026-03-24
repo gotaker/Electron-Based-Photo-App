@@ -1209,3 +1209,477 @@ if (document.readyState === 'loading')
     document.addEventListener('DOMContentLoaded', initApp);
 else
     initApp();
+
+/* ═══════════════════════════════════════════════════════════════
+   SYNC — Google Photos + Apple Photos bidirectional
+═══════════════════════════════════════════════════════════════ */
+
+// ── State ────────────────────────────────────────────────────
+let syncState = {
+    google: {
+        connected: false,
+        clientId: '', clientSecret: '',
+        accessToken: '', refreshToken: '',
+        accountEmail: '', lastSync: null, photoCount: null
+    },
+    apple: {
+        connected: false,
+        lastSync: null, photoCount: null
+    },
+    direction: 'bidirectional',
+    autoSync: false,
+    running: false,
+    log: []
+};
+
+let _autoSyncTimer = null;
+
+// ── Persist ───────────────────────────────────────────────────
+async function loadSyncState() {
+    try {
+        const r = await window.electronAPI.getSyncConfig?.();
+        if (r?.success && r.config) Object.assign(syncState, r.config);
+    } catch (_) {}
+    renderSyncPills();
+}
+
+async function saveSyncState() {
+    try {
+        await window.electronAPI.saveSyncConfig?.({
+            google: { ...syncState.google },
+            apple:  { ...syncState.apple },
+            direction: syncState.direction,
+            autoSync:  syncState.autoSync,
+            log: syncState.log.slice(0, 60)
+        });
+    } catch (_) {}
+}
+
+// ── Log helper ────────────────────────────────────────────────
+function addSyncLog(msg, type = 'inf') {
+    syncState.log.unshift({
+        time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
+        msg, type
+    });
+    if (syncState.log.length > 60) syncState.log.pop();
+    renderSyncLog();
+}
+
+function renderSyncLog() {
+    const el = document.getElementById('syncLog');
+    if (!el) return;
+    el.innerHTML = syncState.log.map(e =>
+        `<div class="sync-log-entry">
+           <span class="sync-log-time">${e.time}</span>
+           <span class="sync-log-msg ${e.type}">${escapeHtml(e.msg)}</span>
+         </div>`
+    ).join('');
+}
+
+// ── Modal open/close ──────────────────────────────────────────
+function openSyncModal() {
+    document.getElementById('syncModal').classList.add('active');
+    refreshSyncUI();
+}
+function closeSyncModal() {
+    document.getElementById('syncModal').classList.remove('active');
+}
+function closeSyncModalOutside(e) {
+    if (e.target === document.getElementById('syncModal')) closeSyncModal();
+}
+function closeOAuthModal() {
+    document.getElementById('oauthModal').classList.remove('active');
+}
+
+// ── Full UI refresh ───────────────────────────────────────────
+function refreshSyncUI() {
+    const g = syncState.google;
+    const a = syncState.apple;
+
+    /* Google card */
+    const gCard = document.getElementById('googleCard');
+    const gBtn  = document.getElementById('googleConnectBtn');
+    const gSub  = document.getElementById('googleStatus');
+    const gDet  = document.getElementById('googleDetail');
+    const gBadge = document.getElementById('googleBadge');
+
+    if (g.connected) {
+        gCard.className     = 'sync-svc-card connected';
+        gSub.textContent    = g.accountEmail || 'Connected';
+        gSub.className      = 'sync-svc-sub connected';
+        gBtn.textContent    = 'Disconnect';
+        gBtn.className      = 'sync-connect-btn disconnect';
+        gBtn.onclick        = disconnectGoogle;
+        gDet.style.display  = 'flex';
+        gBadge.style.display = 'block';
+        gBadge.className    = 'sync-badge connected';
+        document.getElementById('googleAccount').textContent    = g.accountEmail || '—';
+        document.getElementById('googleLastSync').textContent   = g.lastSync ? new Date(g.lastSync).toLocaleString() : 'Never';
+        document.getElementById('googlePhotoCount').textContent = g.photoCount != null ? g.photoCount.toLocaleString() + ' photos' : '—';
+    } else {
+        gCard.className     = 'sync-svc-card';
+        gSub.textContent    = 'Not connected';
+        gSub.className      = 'sync-svc-sub';
+        gBtn.textContent    = 'Connect';
+        gBtn.className      = 'sync-connect-btn';
+        gBtn.onclick        = connectGoogle;
+        gDet.style.display  = 'none';
+        gBadge.style.display = 'none';
+    }
+
+    /* Apple card */
+    const isMac  = /mac/i.test(navigator.platform || navigator.userAgent);
+    const aCard  = document.getElementById('appleCard');
+    const aBtn   = document.getElementById('appleConnectBtn');
+    const aSub   = document.getElementById('appleStatus');
+    const aDet   = document.getElementById('appleDetail');
+    const aBadge = document.getElementById('appleBadge');
+    const aNote  = document.getElementById('applePlatformNote');
+
+    aNote.style.display   = isMac ? 'none' : 'flex';
+    aBtn.disabled         = !isMac;
+    aBtn.style.opacity    = isMac ? '1' : '0.4';
+
+    if (a.connected) {
+        aCard.className     = 'sync-svc-card connected';
+        aSub.textContent    = 'Connected — System Photos Library';
+        aSub.className      = 'sync-svc-sub connected';
+        aBtn.textContent    = 'Disconnect';
+        aBtn.className      = 'sync-connect-btn disconnect';
+        aBtn.onclick        = disconnectApple;
+        aDet.style.display  = 'flex';
+        aBadge.style.display = 'block';
+        aBadge.className    = 'sync-badge connected';
+        document.getElementById('appleLastSync').textContent   = a.lastSync ? new Date(a.lastSync).toLocaleString() : 'Never';
+        document.getElementById('applePhotoCount').textContent = a.photoCount != null ? a.photoCount.toLocaleString() + ' photos' : '—';
+    } else {
+        aCard.className     = 'sync-svc-card';
+        aSub.textContent    = isMac ? 'Not connected' : 'macOS only';
+        aSub.className      = 'sync-svc-sub';
+        aBtn.textContent    = 'Connect';
+        aBtn.className      = 'sync-connect-btn';
+        aBtn.onclick        = connectApple;
+        aDet.style.display  = 'none';
+        aBadge.style.display = 'none';
+    }
+
+    /* Options section */
+    const anyConn = g.connected || a.connected;
+    document.getElementById('syncOptionsWrap').style.display = anyConn ? 'block' : 'none';
+    document.getElementById('syncLogWrap').style.display     = syncState.log.length ? 'block' : 'none';
+
+    const dirEl = document.querySelector(`input[name="syncDir"][value="${syncState.direction}"]`);
+    if (dirEl) dirEl.checked = true;
+
+    const tog = document.getElementById('autoSyncToggle');
+    if (tog) tog.setAttribute('aria-checked', syncState.autoSync ? 'true' : 'false');
+
+    /* Sync Now button */
+    const btn = document.getElementById('syncNowBtn');
+    if (btn) {
+        btn.disabled   = !anyConn || syncState.running;
+        btn.innerHTML  = syncState.running
+            ? '⟳ Syncing…'
+            : `<svg style="width:13px;height:13px" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round"><polyline points="1 4 1 10 7 10"/><polyline points="23 20 23 14 17 14"/><path d="M20.49 9A9 9 0 0 0 5.64 5.64L1 10m22 4-4.64 4.36A9 9 0 0 1 3.51 15"/></svg> Sync Now`;
+    }
+
+    /* Last run timestamp */
+    const runs = [g.lastSync, a.lastSync].filter(Boolean).sort();
+    const last  = runs.pop();
+    document.getElementById('syncLastRun').textContent = last
+        ? 'Last sync: ' + new Date(last).toLocaleString()
+        : 'Last sync: Never';
+
+    renderSyncLog();
+}
+
+// ── Sidebar pills ─────────────────────────────────────────────
+function renderSyncPills() {
+    const row = document.getElementById('syncStatusRow');
+    const gP  = document.getElementById('syncPillGoogle');
+    const aP  = document.getElementById('syncPillApple');
+    if (!row) return;
+    const anyConn = syncState.google.connected || syncState.apple.connected;
+    row.style.display = anyConn ? 'flex' : 'none';
+    if (gP) {
+        gP.style.display = syncState.google.connected ? 'flex' : 'none';
+        gP.className = 'sync-pill ' + (syncState.running ? 'syncing' : 'connected');
+        document.getElementById('syncPillGoogleLabel').textContent = syncState.running ? 'Syncing…' : 'Google';
+    }
+    if (aP) {
+        aP.style.display = syncState.apple.connected ? 'flex' : 'none';
+        aP.className = 'sync-pill ' + (syncState.running ? 'syncing' : 'connected');
+        document.getElementById('syncPillAppleLabel').textContent = syncState.running ? 'Syncing…' : 'Apple';
+    }
+}
+
+function setSyncProgress(pct, label) {
+    const wrap = document.getElementById('syncProgressWrap');
+    const bar  = document.getElementById('syncProgressBar');
+    const lbl  = document.getElementById('syncProgressLabel');
+    if (!wrap) return;
+    if (pct == null) { wrap.style.display = 'none'; return; }
+    wrap.style.display  = 'flex';
+    bar.style.width     = pct + '%';
+    if (lbl && label) lbl.textContent = label;
+}
+
+// ── Google — connect ──────────────────────────────────────────
+function connectGoogle() {
+    if (!syncState.google.clientId) {
+        document.getElementById('oauthModal').classList.add('active');
+        return;
+    }
+    startGoogleOAuth();
+}
+
+function validateOAuth() {
+    const id  = document.getElementById('oauthClientId')?.value.trim();
+    const sec = document.getElementById('oauthClientSecret')?.value.trim();
+    const btn = document.getElementById('oauthSaveBtn');
+    if (btn) btn.disabled = !(id && sec);
+}
+
+function saveOAuthAndConnect() {
+    const id  = document.getElementById('oauthClientId')?.value.trim();
+    const sec = document.getElementById('oauthClientSecret')?.value.trim();
+    if (!id || !sec) return;
+    syncState.google.clientId     = id;
+    syncState.google.clientSecret = sec;
+    saveSyncState();
+    closeOAuthModal();
+    startGoogleOAuth();
+}
+
+async function startGoogleOAuth() {
+    const r = await window.electronAPI.syncGoogleAuth?.({
+        clientId:     syncState.google.clientId,
+        clientSecret: syncState.google.clientSecret
+    });
+    if (!r) { addSyncLog('Google Auth: IPC handler not available', 'err'); return; }
+    if (r.success) {
+        Object.assign(syncState.google, {
+            connected: true,
+            accessToken: r.accessToken, refreshToken: r.refreshToken,
+            accountEmail: r.email || ''
+        });
+        const cr = await window.electronAPI.syncGooglePhotoCount?.({ accessToken: r.accessToken });
+        if (cr?.success) syncState.google.photoCount = cr.count;
+        addSyncLog('Connected to Google Photos' + (r.email ? ' as ' + r.email : ''), 'ok');
+    } else {
+        syncState.google.connected = false;
+        addSyncLog('Google auth failed: ' + (r.error || 'unknown'), 'err');
+    }
+    await saveSyncState();
+    refreshSyncUI();
+    renderSyncPills();
+}
+
+async function disconnectGoogle() {
+    if (!confirm('Disconnect Google Photos? Your local photos will not be deleted.')) return;
+    Object.assign(syncState.google, {
+        connected: false, accessToken: '', refreshToken: '', accountEmail: '', lastSync: null, photoCount: null
+    });
+    addSyncLog('Disconnected from Google Photos');
+    await saveSyncState();
+    refreshSyncUI();
+    renderSyncPills();
+}
+
+// ── Apple — connect ───────────────────────────────────────────
+async function connectApple() {
+    const r = await window.electronAPI.syncAppleConnect?.();
+    if (!r) { addSyncLog('Apple Photos: IPC handler not available', 'err'); return; }
+    if (r.success) {
+        Object.assign(syncState.apple, { connected: true, photoCount: r.photoCount ?? null });
+        addSyncLog('Connected to Apple Photos (' + (r.photoCount ?? '?') + ' photos)', 'ok');
+    } else {
+        addSyncLog('Apple Photos connection failed: ' + (r.error || 'unknown'), 'err');
+    }
+    await saveSyncState();
+    refreshSyncUI();
+    renderSyncPills();
+}
+
+async function disconnectApple() {
+    if (!confirm('Disconnect Apple Photos? Your local photos will not be deleted.')) return;
+    Object.assign(syncState.apple, { connected: false, lastSync: null, photoCount: null });
+    addSyncLog('Disconnected from Apple Photos');
+    await saveSyncState();
+    refreshSyncUI();
+    renderSyncPills();
+}
+
+// ── Direction + auto-sync ─────────────────────────────────────
+document.addEventListener('change', e => {
+    if (e.target.name === 'syncDir') {
+        syncState.direction = e.target.value;
+        saveSyncState();
+    }
+});
+
+function toggleAutoSync() {
+    syncState.autoSync = !syncState.autoSync;
+    const tog = document.getElementById('autoSyncToggle');
+    if (tog) tog.setAttribute('aria-checked', syncState.autoSync ? 'true' : 'false');
+    saveSyncState();
+    if (syncState.autoSync) {
+        scheduleAutoSync();
+        addSyncLog('Auto-sync enabled (every 15 min)');
+    } else {
+        clearInterval(_autoSyncTimer);
+        addSyncLog('Auto-sync disabled');
+    }
+}
+
+function scheduleAutoSync() {
+    clearInterval(_autoSyncTimer);
+    _autoSyncTimer = setInterval(() => { if (!syncState.running) runSync(true); }, 15 * 60 * 1000);
+}
+
+// ── Run sync ──────────────────────────────────────────────────
+async function runSync(silent = false) {
+    if (syncState.running) return;
+    if (!syncState.google.connected && !syncState.apple.connected) {
+        if (!silent) alert('Connect at least one service before syncing.');
+        return;
+    }
+
+    syncState.running = true;
+    renderSyncPills();
+    refreshSyncUI();
+    setSyncProgress(4, 'Starting sync…');
+
+    const dir = syncState.direction;
+    let gDown = 0, gUp = 0, aDown = 0, aUp = 0;
+
+    try {
+        // ── Google Photos ────────────────────────────────────
+        if (syncState.google.connected) {
+            addSyncLog('Google Photos: starting ' + dir + ' sync…');
+
+            if (dir !== 'upload') {
+                setSyncProgress(12, 'Fetching Google library…');
+                const listRes = await window.electronAPI.syncGoogleList?.({
+                    accessToken:  syncState.google.accessToken,
+                    refreshToken: syncState.google.refreshToken,
+                    clientId:     syncState.google.clientId,
+                    clientSecret: syncState.google.clientSecret
+                });
+
+                if (listRes?.success) {
+                    if (listRes.accessToken) syncState.google.accessToken = listRes.accessToken;
+                    syncState.google.photoCount = listRes.items.length;
+
+                    const localGIds = new Set(photos.filter(p => p.googleId).map(p => p.googleId));
+                    const toDownload = listRes.items.filter(i => !localGIds.has(i.id));
+                    addSyncLog('Google: ' + toDownload.length + ' new photos to download');
+
+                    for (let i = 0; i < toDownload.length; i++) {
+                        setSyncProgress(12 + Math.round(i / Math.max(toDownload.length, 1) * 33),
+                            'Downloading ' + (i + 1) + ' / ' + toDownload.length + '…');
+                        const dl = await window.electronAPI.syncGoogleDownload?.({
+                            item: toDownload[i],
+                            accessToken: syncState.google.accessToken
+                        });
+                        if (dl?.success) {
+                            const meta = { ...dl.photo, googleId: toDownload[i].id,
+                                dateAdded: new Date().toISOString(), favorite: false, faces: 0,
+                                album: null, tags: [], deleted: false, deletedAt: null, editedAt: null };
+                            await window.electronAPI.savePhoto(meta);
+                            photos.push({ ...meta, src: dl.photo.src });
+                            gDown++;
+                        }
+                    }
+                } else {
+                    addSyncLog('Google list error: ' + (listRes?.error || 'unknown'), 'err');
+                }
+            }
+
+            if (dir !== 'download') {
+                setSyncProgress(47, 'Uploading to Google Photos…');
+                const toUpload = photos.filter(p => !p.deleted && !p.googleId);
+                addSyncLog('Google: ' + toUpload.length + ' photos to upload');
+
+                for (let i = 0; i < toUpload.length; i++) {
+                    setSyncProgress(47 + Math.round(i / Math.max(toUpload.length, 1) * 35),
+                        'Uploading ' + (i + 1) + ' / ' + toUpload.length + '…');
+                    const up = await window.electronAPI.syncGoogleUpload?.({
+                        photo: toUpload[i],
+                        accessToken:  syncState.google.accessToken,
+                        refreshToken: syncState.google.refreshToken,
+                        clientId:     syncState.google.clientId,
+                        clientSecret: syncState.google.clientSecret
+                    });
+                    if (up?.success) {
+                        if (up.accessToken) syncState.google.accessToken = up.accessToken;
+                        await window.electronAPI.updatePhoto(toUpload[i].id, { googleId: up.googleId });
+                        const loc = photos.find(x => x.id === toUpload[i].id);
+                        if (loc) loc.googleId = up.googleId;
+                        gUp++;
+                    }
+                }
+            }
+
+            syncState.google.lastSync = new Date().toISOString();
+            addSyncLog('Google sync done — ↓' + gDown + ' downloaded, ↑' + gUp + ' uploaded', 'ok');
+        }
+
+        // ── Apple Photos ─────────────────────────────────────
+        if (syncState.apple.connected) {
+            setSyncProgress(85, 'Syncing Apple Photos…');
+            addSyncLog('Apple Photos: starting ' + dir + ' sync…');
+
+            const ar = await window.electronAPI.syncAppleRun?.({
+                direction: dir,
+                localPhotos: photos.filter(p => !p.deleted)
+            });
+
+            if (ar?.success) {
+                if (ar.downloaded?.length) {
+                    for (const dl of ar.downloaded) {
+                        const meta = { ...dl, dateAdded: new Date().toISOString(),
+                            favorite: false, faces: 0, album: null, tags: [],
+                            deleted: false, deletedAt: null, editedAt: null };
+                        await window.electronAPI.savePhoto(meta);
+                        photos.push({ ...meta, src: dl.src });
+                        aDown++;
+                    }
+                }
+                aUp = ar.uploaded || 0;
+                syncState.apple.photoCount = ar.libraryCount ?? syncState.apple.photoCount;
+                syncState.apple.lastSync   = new Date().toISOString();
+                addSyncLog('Apple sync done — ↓' + aDown + ' downloaded, ↑' + aUp + ' uploaded', 'ok');
+            } else {
+                addSyncLog('Apple sync error: ' + (ar?.error || 'unknown'), 'err');
+            }
+        }
+
+        setSyncProgress(100, 'Sync complete');
+        setTimeout(() => setSyncProgress(null), 1800);
+
+        await loadPhotos();
+        renderGallery();
+        updateCounts();
+
+    } catch (err) {
+        addSyncLog('Sync error: ' + err.message, 'err');
+        setSyncProgress(null);
+    } finally {
+        syncState.running = false;
+        await saveSyncState();
+        renderSyncPills();
+        refreshSyncUI();
+    }
+}
+
+// ── Boot integration ──────────────────────────────────────────
+// Wrap the existing initApp to also load sync config
+(function patchInit() {
+    const _orig = window.initApp;
+    window.initApp = async function () {
+        await loadSyncState();
+        if (_orig) await _orig.call(this);
+        if (syncState.autoSync) scheduleAutoSync();
+    };
+})();
