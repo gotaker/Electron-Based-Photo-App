@@ -1,0 +1,89 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <defs>
+    <!-- Squircle clip -->
+    <clipPath id="sq">
+      <rect width="1024" height="1024" rx="225" ry="225"/>
+    </clipPath>
+
+    <!-- Background: deep blue → indigo -->
+    <linearGradient id="bg" x1="0.15" y1="0" x2="0.85" y2="1">
+      <stop offset="0%"   stop-color="#1B65D8"/>
+      <stop offset="100%" stop-color="#0A2F8A"/>
+    </linearGradient>
+
+    <!-- Radial glow behind aperture -->
+    <radialGradient id="glow" cx="50%" cy="48%" r="52%">
+      <stop offset="0%"   stop-color="#5BA8FF" stop-opacity="0.32"/>
+      <stop offset="100%" stop-color="#0A2F8A" stop-opacity="0"/>
+    </radialGradient>
+
+    <!-- Gloss shine at top -->
+    <radialGradient id="shine" cx="50%" cy="0%" r="65%" gradientUnits="objectBoundingBox">
+      <stop offset="0%"   stop-color="white" stop-opacity="0.22"/>
+      <stop offset="100%" stop-color="white" stop-opacity="0"/>
+    </radialGradient>
+
+    <!-- Blade fill: white with slight warm top edge -->
+    <linearGradient id="blade-fill" x1="0" y1="0" x2="0.3" y2="1">
+      <stop offset="0%"   stop-color="#FFFFFF" stop-opacity="1"/>
+      <stop offset="100%" stop-color="#D8EAFF" stop-opacity="0.82"/>
+    </linearGradient>
+
+    <!-- Inner lens glow (center circle fill) -->
+    <radialGradient id="lens" cx="50%" cy="44%" r="60%">
+      <stop offset="0%"   stop-color="#7EC0FF"/>
+      <stop offset="100%" stop-color="#1751C4"/>
+    </radialGradient>
+
+    <!-- Drop shadow filter -->
+    <filter id="blade-shadow" x="-8%" y="-8%" width="116%" height="116%">
+      <feDropShadow dx="0" dy="2" stdDeviation="6" flood-color="#000830" flood-opacity="0.3"/>
+    </filter>
+
+    <!-- Subtle noise for depth (can be removed if sharp doesn't support it) -->
+    <filter id="inner-shadow">
+      <feComposite in="SourceGraphic"/>
+    </filter>
+  </defs>
+
+  <g clip-path="url(#sq)">
+    <!-- ── Background ── -->
+    <rect width="1024" height="1024" fill="url(#bg)"/>
+    <rect width="1024" height="1024" fill="url(#glow)"/>
+
+    <!-- ── Outer ring (barrel) ── -->
+    <circle cx="512" cy="512" r="285" fill="none" stroke="white" stroke-width="6" opacity="0.18"/>
+    <circle cx="512" cy="512" r="272" fill="none" stroke="white" stroke-width="2" opacity="0.28"/>
+
+    <!-- ── Aperture blades ── -->
+    <g filter="url(#blade-shadow)">
+      <path d="M 356.24 297.61 A 265 265 0 0 1 667.76 297.61 L 581.36 416.54 A 118 118 0 0 0 442.64 416.54 Z" fill="url(#blade-fill)" opacity="0.93"/>
+      <path d="M 619.79 269.91 A 265 265 0 0 1 775.55 539.70 L 629.35 524.33 A 118 118 0 0 0 559.99 404.20 Z" fill="url(#blade-fill)" opacity="0.86"/>
+      <path d="M 775.55 484.30 A 265 265 0 0 1 619.79 754.09 L 559.99 619.80 A 118 118 0 0 0 629.35 499.67 Z" fill="url(#blade-fill)" opacity="0.93"/>
+      <path d="M 667.76 726.39 A 265 265 0 0 1 356.24 726.39 L 442.64 607.46 A 118 118 0 0 0 581.36 607.46 Z" fill="url(#blade-fill)" opacity="0.86"/>
+      <path d="M 404.21 754.09 A 265 265 0 0 1 248.45 484.30 L 394.65 499.67 A 118 118 0 0 0 464.01 619.80 Z" fill="url(#blade-fill)" opacity="0.93"/>
+      <path d="M 248.45 539.70 A 265 265 0 0 1 404.21 269.91 L 464.01 404.20 A 118 118 0 0 0 394.65 524.33 Z" fill="url(#blade-fill)" opacity="0.86"/>
+    </g>
+
+    <!-- ── Inner lens ── -->
+    <!-- Dark ring between blades and lens -->
+    <circle cx="512" cy="512" r="116" fill="#08235E" opacity="0.55"/>
+    <!-- Lens fill -->
+    <circle cx="512" cy="512" r="106" fill="url(#lens)"/>
+    <!-- Lens rim -->
+    <circle cx="512" cy="512" r="108" fill="none" stroke="white" stroke-width="3" opacity="0.5"/>
+    <!-- Lens inner highlight -->
+    <circle cx="493" cy="494" r="28" fill="white" opacity="0.22"/>
+    <circle cx="489" cy="490" r="10" fill="white" opacity="0.55"/>
+
+    <!-- ── Center aperture dot ── -->
+    <circle cx="512" cy="512" r="12" fill="white" opacity="0.9"/>
+
+    <!-- ── Top gloss ── -->
+    <rect width="1024" height="480" fill="url(#shine)"/>
+
+    <!-- ── Squircle inner stroke ── -->
+    <rect width="1024" height="1024" rx="225" ry="225"
+          fill="none" stroke="white" stroke-width="2.5" opacity="0.12"/>
+  </g>
+</svg>
