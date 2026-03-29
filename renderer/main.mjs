@@ -4,23 +4,25 @@
  *           EXIF reading, Azure Blob, Google Photos OAuth, Apple Photos sync
  */
 
-import { app, BrowserWindow, ipcMain, dialog, shell, net } from 'electron';
-import path  from 'path';
-import fs    from 'fs';
-import { fileURLToPath } from 'url';
-import { createRequire } from 'module';
+import { app, BrowserWindow, ipcMain, dialog, shell } from 'electron';
+import path   from 'path';
+import fs     from 'fs';
 import crypto from 'crypto';
 import http   from 'http';
-import { exec } from 'child_process';
-import { promisify } from 'util';
+import { fileURLToPath } from 'url';
+import { createRequire }  from 'module';
+import { exec }           from 'child_process';
+import { promisify }      from 'util';
+// electron-store v10+ is pure ESM — import directly, NOT via require()
+import Store from 'electron-store';
 
 const execAsync  = promisify(exec);
 const __filename = fileURLToPath(import.meta.url);
 const __dirname  = path.dirname(__filename);
-const require    = createRequire(import.meta.url);
+// sharp and exifr ship CJS builds — safe to load via createRequire
+const require = createRequire(import.meta.url);
 
 // ── Third-party deps ─────────────────────────────────────────
-const Store  = require('electron-store');
 const sharp  = require('sharp');
 const exifr  = require('exifr');
 
@@ -40,22 +42,31 @@ function ensureDir(p) {
 }
 
 // ── Window ────────────────────────────────────────────────────
-let win;
+// Safe accessor — never throws even before createWindow() has run.
+function getWin() {
+    return BrowserWindow.getFocusedWindow()
+        ?? BrowserWindow.getAllWindows()[0]
+        ?? null;
+}
 
 function createWindow() {
-    win = new BrowserWindow({
+    const isMac = process.platform === 'darwin';
+    const w = new BrowserWindow({
         width: 1280,
         height: 800,
         minWidth: 900,
         minHeight: 600,
-        titleBarStyle: process.platform === 'darwin' ? 'hiddenInset' : 'default',
+        titleBarStyle:        isMac ? 'hiddenInset' : 'default',
+        // Pin traffic lights so they don't shift on resize
+        trafficLightPosition: isMac ? { x: 16, y: 20 } : undefined,  // centred in 56px bar
         webPreferences: {
-            preload:       path.join(__dirname, 'preload.js'),
+            preload:          path.join(__dirname, 'preload.js'),
             contextIsolation: true,
             nodeIntegration:  false,
         },
     });
-    win.loadFile(path.join(__dirname, 'renderer', 'index.html'));
+    w.loadFile(path.join(__dirname, 'renderer', 'index.html'));
+    return w;
 }
 
 app.whenReady().then(() => {
@@ -63,10 +74,18 @@ app.whenReady().then(() => {
     app.on('activate', () => {
         if (BrowserWindow.getAllWindows().length === 0) createWindow();
     });
+}).catch(err => {
+    console.error('App failed to start:', err);
+    app.quit();
 });
 
 app.on('window-all-closed', () => {
     if (process.platform !== 'darwin') app.quit();
+});
+
+// Surface main-process promise rejections clearly instead of swallowing them.
+process.on('unhandledRejection', (reason) => {
+    console.error('[PhotoVault] Unhandled rejection:', reason);
 });
 
 
@@ -167,7 +186,7 @@ ipcMain.handle('delete-photos', async (_e, photoIds) => {
 
 ipcMain.handle('open-file-dialog', async () => {
     try {
-        const { canceled, filePaths } = await dialog.showOpenDialog(win, {
+        const { canceled, filePaths } = await dialog.showOpenDialog(getWin(), {
             properties: ['openFile', 'multiSelections'],
             filters: [
                 { name: 'Images', extensions: ['jpg','jpeg','png','webp','heic','heif','tiff','bmp'] }
@@ -263,7 +282,7 @@ ipcMain.handle('export-photo', async (_e, photoId, suggestedName) => {
         const photo  = photos.find(p => p.id === photoId);
         if (!photo || !photo.storagePath) return { success: false, error: 'Photo not found' };
 
-        const { canceled, filePath } = await dialog.showSaveDialog(win, {
+        const { canceled, filePath } = await dialog.showSaveDialog(getWin(), {
             defaultPath: suggestedName || photo.name,
             filters: [{ name: 'Images', extensions: ['jpg','jpeg','png','webp'] }]
         });
@@ -393,7 +412,7 @@ ipcMain.handle('get-storage-info', async () => {
 
 ipcMain.handle('change-storage-location', async () => {
     try {
-        const { canceled, filePaths } = await dialog.showOpenDialog(win, {
+        const { canceled, filePaths } = await dialog.showOpenDialog(getWin(), {
             properties: ['openDirectory', 'createDirectory'],
             title: 'Choose PhotoVault storage folder',
         });
