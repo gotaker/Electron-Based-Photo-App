@@ -65,6 +65,7 @@ PhotoVault is a desktop Electron application for importing, organizing, viewing,
 - **Code review:** At least one approving review from a project maintainer and any requested changes addressed.
 - **Security:** No new high-severity vulnerabilities; dependency changes reviewed.
 - **Release/Version:** If applicable, version bump or changelog entries added.
+
 ## Safe-change Rules
 
 - **Small, focused PRs:** Keep changes minimal and focused on a single purpose. Large refactors should be split into multiple PRs.
